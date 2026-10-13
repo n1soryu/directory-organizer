@@ -1,0 +1,126 @@
+import Foundation
+
+/// Gathers `FileFacts` for one file. No model involved: just metadata, PDFKit,
+/// the Office XML, and Vision OCR for images and scanned PDFs.
+public struct FactExtractor: Sendable {
+    /// Characters of text to keep for a normal file.
+    public var textLimit = 4_000
+    /// Files with unclear names are read more deeply, since the content is all we have.
+    public var deepTextLimit = 8_000
+    /// Plain-text files bigger than this aren't read (logs, data dumps).
+    public var maxPlainTextBytes = 512 * 1024
+
+    public init() {}
+
+    public func facts(for url: URL) async -> FileFacts {
+        let keys: Set<URLResourceKey> = [
+            .isDirectoryKey, .isPackageKey, .fileSizeKey, .creationDateKey,
+            .contentModificationDateKey, .addedToDirectoryDateKey,
+        ]
+        let values = try? url.resourceValues(forKeys: keys)
+        let isDirectory = values?.isDirectory ?? false
+        let ext = url.pathExtension.lowercased()
+        let baseName = url.deletingPathExtension().lastPathComponent
+
+        var facts = FileFacts(
+            url: url,
+            name: url.lastPathComponent,
+            baseName: baseName,
+            fileExtension: ext,
+            kind: FileKind(fileExtension: ext, isDirectory: isDirectory),
+            isDirectory: isDirectory,
+            size: Int64(values?.fileSize ?? 0),
+            created: values?.creationDate,
+            modified: values?.contentModificationDate,
+            dateAdded: values?.addedToDirectoryDate,
+            whereFroms: WhereFroms.read(url),
+            isScreenshot: ScreenCapture.isMarked(url),
+            nameIsUnclear: NameQuality.isUnclear(baseName),
+            notes: []
+        )
+        let limit = facts.nameIsUnclear ? deepTextLimit : textLimit
+
+        switch facts.kind {
+        case .pdf:
+            await readPDF(into: &facts, limit: limit)
+        case .wordDocument, .spreadsheet, .presentation:
+            if ["docx", "xlsx", "pptx"].contains(ext) {
+                do {
+                    let office = try OfficeText.read(url, limit: limit)
+                    facts.setText(office.text, source: .office)
+                    facts.documentTitle = office.title
+                } catch {
+                    facts.notes.append("Couldn't read Office text: \(error)")
+                }
+            }
+        case .image:
+            if let meta = ImageMetadata.load(url) {
+                facts.image = meta.info
+                facts.isScreenshot = facts.isScreenshot || meta.looksLikeScreenshot
+            }
+            // OCR every image: it's how a photographed recovery phrase gets caught.
+            facts.setText(await TextRecognizer.text(at: url), source: .imageOCR, limit: limit)
+        case .video, .audio:
+            facts.media = await MediaMetadata.load(url)
+        case .archive:
+            if ext == "zip" {
+                facts.archiveEntries = (try? ZipArchive(url: url))?.entries.prefix(500).map(\.path)
+            }
+        case .folder:
+            facts.archiveEntries = (try? FileManager.default.contentsOfDirectory(atPath: url.path))?.sorted()
+        default:
+            break
+        }
+
+        // Read plain text (CSV, notes, keys, files without an extension) for the safety checks.
+        if facts.text == nil, !isDirectory, facts.kind.isPlainText || facts.kind == .presentation,
+           facts.size <= maxPlainTextBytes, let text = Self.readPlainText(url, limit: limit) {
+            facts.setText(text, source: .content)
+        }
+        return facts
+    }
+
+    private func readPDF(into facts: inout FileFacts, limit: Int) async {
+        let maxPages = facts.nameIsUnclear ? 3 : 2
+        guard let pdf = PDFText.read(facts.url, maxPages: maxPages, limit: limit) else {
+            facts.notes.append("Couldn't open PDF")
+            return
+        }
+        facts.pageCount = pdf.pageCount
+        facts.documentTitle = pdf.title
+        facts.setText(pdf.text, source: .pdfText)
+
+        // A scan has no text layer: render the first pages and OCR them.
+        if (facts.text?.filter { !$0.isWhitespace }.count ?? 0) < 40 {
+            var ocr = ""
+            for page in PDFText.renderPages(facts.url, maxPages: maxPages) {
+                ocr += await TextRecognizer.text(in: page) + "\n"
+            }
+            facts.setText(ocr, source: .pdfOCR, limit: limit)
+        }
+    }
+
+    /// The start of a file, if it's UTF-8 text (binary files return nil).
+    static func readPlainText(_ url: URL, limit: Int) -> String? {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+        guard let data = try? handle.read(upToCount: limit * 4), !data.isEmpty,
+              !data.contains(0) else { return nil }
+        // Cutting at a byte limit can split a multi-byte character; drop the partial tail.
+        for trim in 0...3 where data.count > trim {
+            if let text = String(data: data.dropLast(trim), encoding: .utf8) {
+                return String(text.prefix(limit))
+            }
+        }
+        return nil
+    }
+}
+
+extension FileFacts {
+    mutating func setText(_ value: String, source: TextSource, limit: Int = .max) {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        text = String(trimmed.prefix(limit))
+        textSource = source
+    }
+}
