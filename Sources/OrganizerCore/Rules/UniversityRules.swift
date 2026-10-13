@@ -72,7 +72,7 @@ struct CourseRule: Rule {
         let rename = facts.nameIsUnclear ? Self.courseFileName(code: code, facts: facts) : nil
         var reason = "Course \(code): \(evidence)"
         if facts.nameIsUnclear && rename == nil {
-            reason += " (name unclear; the model will suggest one in Milestone 3)"
+            reason += " (name unclear)"
         }
         return Decision(
             destination: "\(config.university)/\(code)",

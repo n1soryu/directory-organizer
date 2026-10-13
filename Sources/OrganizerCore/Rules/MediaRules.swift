@@ -37,7 +37,7 @@ struct ImageRule: Rule {
         guard facts.kind == .image else { return nil }
         var reason = facts.isScreenshot ? "Screenshot" : "Image"
         if facts.nameIsUnclear {
-            reason += " (name unclear; the model will describe it in Milestone 3)"
+            reason += " (name unclear)"
         }
         return Decision(destination: config.downloadedImages, confidence: 0.95, reason: reason, source: .rule(name))
     }

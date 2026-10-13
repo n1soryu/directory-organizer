@@ -18,8 +18,8 @@ A wrong guess sends the file to the review folder; it is never lost.
 |---|---|---|
 | 1 | Fact extraction, rules engine, plan-only CLI, stub classifier | ✅ |
 | 2 | Apply moves, undo log, Finder tags, safety checks, creating folders and renaming | ✅ |
-| 3 | Apple Foundation Models classifier (text + images), Ollama fallback | next |
-| 4 | Menu-bar app, Downloads watcher, approval UI, review-folder reminder every 8 hours | |
+| 3 | Apple's on-device model for leftovers: folders, new folders, names (text and images) | ✅ |
+| 4 | Menu-bar app, Downloads watcher, approval UI, review-folder reminder every 8 hours | next |
 | 5 | Night runs: plugged in, idle, cool, within a time window | |
 | 6 | Evaluation on a labeled test set: rules only vs rules + model | |
 
@@ -69,7 +69,35 @@ Music folders until real use is switched on deliberately.
    `Movies/TV Shows/<Show>/Show S01E04.mkv`, short clips → `Movies/Clips`. Release clutter
    (4K, BluRay, x265 …) is removed; a year is kept only if it was in the name.
 8. **Images** → `Pictures/Downloaded Images`
-9. Anything else → the model (Milestone 3). Until then: review.
+9. Anything else → the model (below). If it's unavailable or unsure: review.
+
+## The model (Apple's on-device Foundation Models)
+
+Used only where rules can't decide, and only ever *suggests*:
+
+- **Leftover files:** first question: *what is this, and does one of these folders fit?* The answer
+  is constrained at generation time to the folders that exist (a schema built at runtime with
+  `DynamicGenerationSchema`), so it can't invent a path. If nothing fits, a second, simpler
+  question asks for a **new category folder** ("Manuals", "Bills").
+- **Unclear names:** for files a rule has already placed (`IMG_4821.png`, `download.pdf`), it
+  suggests a name. For images it **looks at the picture**. Images are dated: `2026-10-12 Router
+  wireless settings page.png`.
+- It never sees the file system and never acts. It receives a text summary of the facts (plus
+  the image itself for pictures), one fresh session per question, greedy (repeatable) sampling.
+
+Swift then checks every answer:
+- the folder must be one that was offered, or a valid new folder (right parent for the file
+  type, at most 2 levels, a sane name). A near-duplicate name reuses the existing folder:
+  "Manual" → "Manuals".
+- University folders need NSU evidence the model can't make up: a northsouth.edu source,
+  "North South University" in the text, or a known course code.
+- **Tags come from the folder**, never from the model.
+- confidence is chosen as high / medium / low (small models are poor at exact numbers):
+  0.9 / 0.75 / 0.4, with a threshold of 0.75. Below it, the file goes to review.
+- if Apple Intelligence is off or still downloading, leftovers simply go to review.
+- sensitive files (safety rules) are never renamed by the model.
+
+`organize model` shows whether the model is available; `--no-model` runs rules only.
 
 ## Safety, in code
 
@@ -113,12 +141,12 @@ Sources/OrganizerCore/   facts, safety, rules, planning, applying (no UI)
   Naming/      unclear-name check, name cleaning, film/TV name parsing
   Safety/      sensitive-file detector, BIP-39 wordlist
   Rules/       rules engine and the rules above
-  Classify/    FileClassifier protocol + stub (the model plugs in here)
+  Classify/    FileClassifier protocol, AppleClassifier (Foundation Models), FactSummary
   Planning/    Planner (duplicates, clashes, new folders), DestinationValidator
   Apply/       Applier, Undoer, SafeMove, MoveJournal (write-ahead log), FinderTags
-  Config/      folder layout, record types, NSU course catalog
+  Config/      folder layout, record types, NSU course catalog, FolderCatalog (folders offered to the model)
 Sources/TestDataKit/     generates realistic fake downloads + expected results
-Sources/organize/        the CLI (plan, apply, undo, log, facts)
+Sources/organize/        the CLI (plan, apply, undo, log, model, facts)
 docs/CLI-CHEATSHEET.md   every command in one place
 ```
 

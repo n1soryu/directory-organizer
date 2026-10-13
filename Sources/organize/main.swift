@@ -5,11 +5,14 @@ let usage = """
     organize: sorts downloads into your folders. Nothing moves without your approval.
 
     Usage:
-      organize plan <folder> [--home <folder>] [--json]
+      organize plan <folder> [--home <folder>] [--json] [--no-model]
           Show where every item in <folder> would go. Moves nothing.
-      organize apply <folder> [--home <folder>] [--yes]
+      organize apply <folder> [--home <folder>] [--yes] [--no-model]
           Show the plan, ask for approval (all / one by one / cancel), then move and tag.
-          --yes   approve everything without asking
+          --yes        approve everything without asking
+          --no-model   rules only: files no rule can place go to review
+      organize model
+          Is Apple's on-device model available?
       organize undo --last | --batch <id> | --all | <file name>  [--home <folder>]
           Put files back exactly as they were (original folder, name and tags).
       organize log [--home <folder>]
@@ -101,9 +104,16 @@ struct Arguments {
     }
 }
 
-func makePlan(_ folder: URL, _ home: URL) async -> Plan {
+func makePlan(_ folder: URL, _ home: URL, useModel: Bool) async -> Plan {
+    var planner = Planner(homeRoot: home)
+    if useModel {
+        planner.classifier = AppleClassifier()
+        if let reason = AppleClassifier.unavailableReason() {
+            FileHandle.standardError.write(Data("note: Apple's model isn't available (\(reason)); files no rule can place go to review.\n".utf8))
+        }
+    }
     do {
-        return try await Planner(homeRoot: home).plan(folder: folder)
+        return try await planner.plan(folder: folder)
     } catch {
         fail("couldn't read \(folder.path): \(error.localizedDescription)")
     }
@@ -119,7 +129,7 @@ switch command {
 case "plan":
     let arguments = Arguments(args)
     let (folder, home) = arguments.folders()
-    let plan = await makePlan(folder, home)
+    let plan = await makePlan(folder, home, useModel: !arguments.flags.contains("--no-model"))
     if arguments.flags.contains("--json") {
         print(String(decoding: try encoder().encode(plan), as: UTF8.self))
     } else {
@@ -129,7 +139,7 @@ case "plan":
 case "apply":
     let arguments = Arguments(args)
     let (folder, home) = arguments.folders()
-    let plan = await makePlan(folder, home)
+    let plan = await makePlan(folder, home, useModel: !arguments.flags.contains("--no-model"))
     printer.print(plan)
     guard !plan.actions.isEmpty else { print("\nNothing to do."); exit(0) }
 
@@ -175,6 +185,14 @@ case "log":
     let log = journal(for: home)
     try log.recover()
     printer.printLog(try log.records(), home: home)
+
+case "model":
+    if let reason = AppleClassifier.unavailableReason() {
+        print("Apple's on-device model: not available (\(reason)).")
+        print("Files no rule can place will go to review until it is.")
+    } else {
+        print("Apple's on-device model: available\(AppleClassifier.canSeeImages ? ", can look at images" : "").")
+    }
 
 case "facts":
     guard let file = args.first.map(path) else { fail("which file?") }

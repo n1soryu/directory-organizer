@@ -1,0 +1,196 @@
+import Foundation
+import FoundationModels
+
+/// Apple's on-device model (Foundation Models framework). Runs locally, no network.
+///
+/// Answers are constrained with a schema built at runtime (`DynamicGenerationSchema`): the
+/// destination is an `anyOf` over the folders offered, so the model can't name a folder that
+/// isn't on the list. Swift still checks everything it returns.
+public struct AppleClassifier: FileClassifier {
+    public let name = "apple"
+    /// Characters of document text to include. The model's window is ~8k tokens in total.
+    public var textLimit = 2_500
+
+    /// Offered alongside the folders; leads to the second question (which new folder?).
+    static let noneFits = "none of these"
+    /// The model isn't good at precise probabilities, so it picks a word; we map it to a number.
+    static let confidenceLevels: [String: Double] = ["high": 0.9, "medium": 0.75, "low": 0.4]
+
+    public init() {}
+
+    /// nil if the model can be used, otherwise why not, in plain words.
+    public static func unavailableReason() -> String? {
+        switch SystemLanguageModel.default.availability {
+        case .available: nil
+        case .unavailable(.deviceNotEligible): "this Mac can't run Apple Intelligence"
+        case .unavailable(.appleIntelligenceNotEnabled): "Apple Intelligence is turned off (System Settings → Siri)"
+        case .unavailable(.modelNotReady): "the model is still downloading or getting ready"
+        case .unavailable(let other): "\(other)"
+        }
+    }
+
+    public static var canSeeImages: Bool {
+        SystemLanguageModel.default.capabilities.contains(.vision)
+    }
+
+    // MARK: - Where should this file go?
+
+    public func suggest(_ request: ClassificationRequest) async throws -> ClassifierSuggestion {
+        if let reason = Self.unavailableReason() { throw ClassifierError.unavailable(reason) }
+
+        let folderChoices = request.folders.map(\.path) + [Self.noneFits]
+        // Property order is generation order: describe the file, decide whether a folder
+        // fits, and only then pick one. Tags aren't asked for: they follow from the folder.
+        let schema = try GenerationSchema(root: DynamicGenerationSchema(name: "FileDecision", properties: [
+            .init(name: "kind", description: "What this file is, in 2-5 words (e.g. router user manual, electricity bill, lecture slides)",
+                  schema: .init(type: String.self)),
+            .init(name: "existingFolderFits", description: "Is there a listed folder whose purpose clearly matches this kind of file?",
+                  schema: .init(name: "Fits", anyOf: ["yes", "no"])),
+            .init(name: "destination", description: "The matching folder, or \"none of these\" if no folder's purpose matches",
+                  schema: .init(name: "Folder", anyOf: folderChoices)),
+            .init(name: "newName", description: "Only if the file name is unclear: a clear name of 2-8 words, no extension",
+                  schema: .init(type: String.self), isOptional: true),
+            .init(name: "reason", description: "One sentence explaining the choice",
+                  schema: .init(type: String.self)),
+            .init(name: "confidence", description: "How sure you are",
+                  schema: .init(name: "Confidence", anyOf: ["high", "medium", "low"])),
+        ]), dependencies: [])
+
+        let instructions = Self.instructions(folders: request.folders, review: request.reviewFolder)
+        let content = try await respond(instructions: instructions, schema: schema) { limit in
+            Prompt { FactSummary.describe(request.facts, textLimit: limit) }
+        }
+
+        let destination: String = try content.value(forProperty: "destination")
+        let kind: String = (try? content.value(forProperty: "kind")) ?? ""
+        let fits: String = (try? content.value(forProperty: "existingFolderFits")) ?? "yes"
+        let because: String = (try? content.value(forProperty: "reason")) ?? ""
+        let reason = kind.isEmpty ? because : "\(kind.prefix(1).uppercased() + kind.dropFirst()): \(because)"
+        let level: String = (try? content.value(forProperty: "confidence")) ?? "low"
+        let suggestion = ClassifierSuggestion(
+            destination: destination,
+            newBaseName: try? content.value(String?.self, forProperty: "newName"),
+            confidence: Self.confidenceLevels[level] ?? 0.4,
+            reason: reason
+        )
+        // No folder fits: ask a second, simpler question about a new folder.
+        if destination == Self.noneFits || (fits == "no" && destination == request.reviewFolder) {
+            return try await newFolder(for: request, kind: kind, newName: suggestion.newBaseName)
+        }
+        return suggestion
+    }
+
+    /// The second question: which general category folder should this kind of file get?
+    private func newFolder(for request: ClassificationRequest, kind: String, newName: String?) async throws -> ClassifierSuggestion {
+        let schema = try GenerationSchema(root: DynamicGenerationSchema(name: "NewFolder", properties: [
+            .init(name: "folderName", description: "A general category name, 1-3 words, plural (e.g. Manuals, Bills, Receipts)",
+                  schema: .init(type: String.self)),
+            .init(name: "parent", description: "Where the new folder goes",
+                  schema: .init(name: "Parent", anyOf: request.newFolderParents)),
+            .init(name: "confidence", description: "How sure you are that this category suits the file and similar files",
+                  schema: .init(name: "Confidence", anyOf: ["high", "medium", "low"])),
+        ]), dependencies: [])
+        let existing = request.folders.map { $0.path.split(separator: "/").last.map(String.init) ?? $0.path }
+        let instructions = """
+            You organize downloaded files on a Mac. None of the existing folders fits this file, so it needs a new folder. \
+            Name the folder after the general kind of file, so similar files can go there too: \
+            "Manuals" for any user guide, "Bills" for any utility bill. Never use the file's own name, a brand or a date. \
+            Existing folder names, for reference: \(existing.joined(separator: ", ")).
+            """
+        let content = try await respond(instructions: instructions, schema: schema) { limit in
+            Prompt { "This file is: \(kind)\n\n" + FactSummary.describe(request.facts, textLimit: min(limit, 800)) }
+        }
+        let name: String = try content.value(forProperty: "folderName")
+        let parent: String = try content.value(forProperty: "parent")
+        let level: String = (try? content.value(forProperty: "confidence")) ?? "low"
+        let folder = name.trimmingCharacters(in: CharacterSet(charactersIn: " /\"'."))
+        return ClassifierSuggestion(
+            destination: parent + "/" + folder, isNewFolder: true, newBaseName: newName,
+            confidence: Self.confidenceLevels[level] ?? 0.4,
+            reason: "\(kind.prefix(1).uppercased() + kind.dropFirst()): no existing folder fits, new folder \"\(folder)\"")
+    }
+
+    // MARK: - What should this file be called?
+
+    public func suggestName(for facts: FileFacts) async throws -> NameSuggestion {
+        if let reason = Self.unavailableReason() { throw ClassifierError.unavailable(reason) }
+
+        let schema = try GenerationSchema(root: DynamicGenerationSchema(name: "FileName", properties: [
+            .init(name: "title", description: "2-8 words saying what this is, like a good file name. No date, no extension.",
+                  schema: .init(type: String.self)),
+            .init(name: "confidence", description: "How sure you are",
+                  schema: .init(name: "Confidence", anyOf: ["high", "medium", "low"])),
+        ]), dependencies: [])
+
+        let showImage = facts.kind == .image && Self.canSeeImages
+        let instructions = """
+            You name downloaded files on a Mac. Given a file's details\(showImage ? " and the picture itself" : ""), \
+            write a short, specific, descriptive title, the way a careful person would name the file. \
+            Describe what it is (e.g. "Router wireless settings page", "Bank statement September"), not its format. \
+            If you can't tell what it is, say so with low confidence.
+            """
+        let content = try await respond(instructions: instructions, schema: schema) { limit in
+            Prompt {
+                FactSummary.describe(facts, textLimit: limit)
+                if showImage {
+                    Attachment(imageURL: facts.url)
+                }
+            }
+        }
+        let title: String = try content.value(forProperty: "title")
+        let level: String = (try? content.value(forProperty: "confidence")) ?? "low"
+        return NameSuggestion(title: title, confidence: Self.confidenceLevels[level] ?? 0.4)
+    }
+
+    // MARK: - Shared
+
+    /// One fresh session per question, so files don't influence each other. Greedy sampling
+    /// gives the same answer for the same file every time. If the text doesn't fit the
+    /// context window, retries once with a shorter excerpt.
+    private func respond(instructions: String, schema: GenerationSchema,
+                         prompt: (Int) -> Prompt) async throws -> GeneratedContent {
+        var limit = textLimit
+        while true {
+            let session = LanguageModelSession(instructions: instructions)
+            do {
+                let response = try await session.respond(
+                    to: prompt(limit), schema: schema, options: GenerationOptions(samplingMode: .greedy))
+                return response.content
+            } catch let error as LanguageModelError {
+                switch error {
+                case .contextSizeExceeded where limit > 500:
+                    limit /= 3
+                case .guardrailViolation, .refusal:
+                    throw ClassifierError.declined("\(error)")
+                default:
+                    throw error
+                }
+            }
+        }
+    }
+
+    static func instructions(folders: [FolderOption], review: String) -> String {
+        let list = folders.map { folder in
+            var line = "- \(folder.path)"
+            if let purpose = folder.purpose { line += ": \(purpose)" }
+            if !folder.tags.isEmpty { line += " [tag: \(folder.tags.map(\.name).joined(separator: ", "))]" }
+            return line
+        }.joined(separator: "\n")
+        return """
+            You sort downloaded files into folders on a Mac. The owner is an economics student at \
+            North South University (NSU) in Bangladesh and a member of the NSU Formula SAE team.
+            You only suggest; code checks your answer and the owner approves it.
+
+            Folders:
+            \(list)
+
+            Rules:
+            - A folder fits only if its purpose matches what the file is. Being a student does not make \
+            every file university material: a router manual or an electricity bill is not about the university.
+            - University folders are only for files from North South University (northsouth.edu) or about an NSU course.
+            - If no folder's purpose matches what the file is, choose "none of these": a new folder will be made for it.
+            - If you can't tell what the file is, choose \(review) with low confidence.
+            - Suggest a new name only when the current name is unclear.
+            """
+    }
+}

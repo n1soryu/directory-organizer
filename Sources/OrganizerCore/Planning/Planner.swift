@@ -42,6 +42,8 @@ public struct Planner: Sendable {
         var hashes = HashCache()
         let copies = duplicatesWithinBatch(facts, &hashes)
         var reserved = Set<String>()
+        let folders = FolderCatalog.options(homeRoot: homeRoot, config: config)
+        var newFolders: [String: String] = [:]
         var actions: [ProposedAction] = []
 
         for item in facts {
@@ -55,7 +57,7 @@ public struct Planner: Sendable {
                     alerts: [Alert(.duplicate, "Identical to \(original.lastPathComponent), also in this folder")]
                 )
             } else {
-                decision = await decide(item)
+                decision = await decide(item, folders: folders, newFolders: &newFolders)
             }
             actions.append(resolve(item, decision, &hashes, &reserved))
         }
@@ -65,26 +67,161 @@ public struct Planner: Sendable {
 
     /// Rules first; the classifier only for files no rule could place. Every answer is checked.
     public func decide(_ facts: FileFacts) async -> Decision {
-        if let decision = rules.decide(facts, config: config) {
-            return checked(decision)
+        var newFolders: [String: String] = [:]
+        return await decide(facts, folders: FolderCatalog.options(homeRoot: homeRoot, config: config), newFolders: &newFolders)
+    }
+
+    /// `newFolders` remembers new folders proposed earlier in this plan, so "Manual" and
+    /// "Manuals" for two files become one folder.
+    func decide(_ facts: FileFacts, folders: [FolderOption], newFolders: inout [String: String]) async -> Decision {
+        if var decision = rules.decide(facts, config: config) {
+            decision = checked(decision)
+            if decision.newBaseName == nil, facts.nameIsUnclear, wantsName(decision, facts) {
+                decision = await named(decision, facts)
+            }
+            return decision
         }
-        let suggestion = try? await classifier.suggest(for: facts, config: config)
-        guard let suggestion else {
-            return Decision(destination: config.reviewFolder, confidence: 0,
-                            reason: "No rule matched and there's no model yet (Milestone 3)",
-                            source: .classifier(classifier.name))
+
+        let request = ClassificationRequest(
+            facts: facts, folders: folders, newFolderParents: FolderCatalog.newFolderParents(for: facts.kind),
+            reviewFolder: config.reviewFolder)
+        let suggestion: ClassifierSuggestion
+        do {
+            suggestion = try await classifier.suggest(request)
+        } catch {
+            return toReview("No rule matched; \(error)", confidence: 0)
         }
+
         guard suggestion.confidence >= config.confidenceThreshold else {
-            return Decision(destination: config.reviewFolder, confidence: suggestion.confidence,
-                            reason: "Model unsure (\(Int(suggestion.confidence * 100))%): \(suggestion.reason)",
-                            source: .classifier(classifier.name))
+            return toReview("Model unsure (\(Int(suggestion.confidence * 100))%), would have chosen \(suggestion.destination): \(suggestion.reason)",
+                            confidence: suggestion.confidence)
         }
-        // Only tags on the allowlist survive; anything else the model invents is dropped.
-        let allowedTags = [Tag.nsu, .fsae, .personal, .secure]
-        let tags = suggestion.tags.compactMap { name in allowedTags.first { $0.name.lowercased() == name.lowercased() } }
-        return checked(Decision(destination: suggestion.destination, newBaseName: suggestion.newBaseName, tags: tags,
+
+        // The folder must be one we offered, or a new folder that passes the checks.
+        var destination = suggestion.destination
+        if suggestion.isNewFolder {
+            switch newFolder(destination, kind: facts.kind, folders: folders, newFolders: &newFolders) {
+            case .success(let path): destination = path
+            case .failure(let problem): return rejected(suggestion, problem.message)
+            }
+        } else if !folders.contains(where: { $0.path == destination }) {
+            return rejected(suggestion, "\(destination) wasn't one of the folders offered")
+        }
+
+        // University folders need NSU evidence the model can't invent: the download source,
+        // "North South University" in the text, or one of your course codes.
+        if destination == config.university || destination.hasPrefix(config.university + "/"), !hasNSUEvidence(facts) {
+            return rejected(suggestion, "no sign it's an NSU file")
+        }
+
+        // Tags come from the folder, not from the model.
+        let tags = Self.tags(for: destination, folders: folders)
+        let newName = facts.nameIsUnclear ? suggestion.newBaseName.flatMap(Self.validTitle) : nil
+        return checked(Decision(destination: destination, newBaseName: newName, tags: tags,
                                 confidence: suggestion.confidence, reason: suggestion.reason,
                                 source: .classifier(classifier.name)))
+    }
+
+    /// The tags of the folder, or of the nearest listed folder above it.
+    static func tags(for destination: String, folders: [FolderOption]) -> [Tag] {
+        folders
+            .filter { destination == $0.path || destination.hasPrefix($0.path + "/") }
+            .max { $0.path.count < $1.path.count }?.tags ?? []
+    }
+
+    private func hasNSUEvidence(_ facts: FileFacts) -> Bool {
+        facts.isNSU
+            || !config.courses.knownCodes(in: facts.baseName + "\n" + facts.head(3_000)).isEmpty
+    }
+
+    private func toReview(_ reason: String, confidence: Double, alerts: [Alert] = []) -> Decision {
+        Decision(destination: config.reviewFolder, confidence: confidence, reason: reason,
+                 source: .classifier(classifier.name), alerts: alerts)
+    }
+
+    private func rejected(_ suggestion: ClassifierSuggestion, _ problem: String) -> Decision {
+        toReview("Model suggestion rejected (\(problem)): \(suggestion.reason)", confidence: suggestion.confidence,
+                 alerts: [Alert(.rejected, "Model suggested \(suggestion.destination); rejected: \(problem)")])
+    }
+
+    // MARK: - New folders proposed by the model
+
+    struct FolderProblem: Error { var message: String }
+
+    /// Checks a proposed new folder ("Documents/Manuals") and reuses an existing or already
+    /// proposed folder with nearly the same name. At most 2 new levels below the parent.
+    func newFolder(_ path: String, kind: FileKind, folders: [FolderOption],
+                   newFolders: inout [String: String]) -> Result<String, FolderProblem> {
+        let parts = path.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
+        guard let parent = parts.first, FolderCatalog.newFolderParents(for: kind).contains(parent) else {
+            return .failure(FolderProblem(message: "a \(kind.rawValue) file can't get a new folder under \(parts.first ?? "")"))
+        }
+        let names = Array(parts.dropFirst())
+        guard (1...2).contains(names.count) else {
+            return .failure(FolderProblem(message: "a new folder may add 1 or 2 levels, not \(names.count)"))
+        }
+        for name in names {
+            guard !name.isEmpty, name == FileNames.sanitize(name), name.count <= 40,
+                  name.contains(where: \.isLetter) else {
+                return .failure(FolderProblem(message: "\"\(name)\" isn't a usable folder name"))
+            }
+        }
+
+        // Reuse: compare loosely with folders that exist and folders proposed earlier.
+        let key = ([parent] + names.map(FolderCatalog.looseKey)).joined(separator: "/")
+        if let earlier = newFolders[key] { return .success(earlier) }
+        if let existing = folders.first(where: { option in
+            let p = option.path.split(separator: "/").map(String.init)
+            return p.count == names.count + 1 && p[0] == parent
+                && zip(p.dropFirst(), names).allSatisfy { FolderCatalog.looseKey($0) == FolderCatalog.looseKey($1) }
+        }) {
+            return .success(existing.path)
+        }
+        newFolders[key] = path
+        return .success(path)
+    }
+
+    // MARK: - Names suggested by the model
+
+    /// Worth asking the model for a name: a file being filed (not reviewed, not a safety
+    /// case), not a video (rules clean those names).
+    private func wantsName(_ decision: Decision, _ facts: FileFacts) -> Bool {
+        if case .safety = decision.source { return false }
+        return decision.destination != config.reviewFolder && facts.kind != .video && !facts.isDirectory
+    }
+
+    private func named(_ decision: Decision, _ facts: FileFacts) async -> Decision {
+        var decision = decision
+        do {
+            let suggestion = try await classifier.suggestName(for: facts)
+            guard suggestion.confidence >= config.confidenceThreshold, var title = Self.validTitle(suggestion.title) else {
+                decision.reason += "; model couldn't name it confidently"
+                return decision
+            }
+            if facts.kind == .image {
+                // Images: "2026-10-12 Router wireless settings page", dated by when it was taken.
+                title = "\(FileNames.day(facts.image?.dateTaken ?? facts.downloadDate)) \(title)"
+            } else if let code = decision.destination.split(separator: "/").last.map(String.init),
+                      config.courses.contains(code), !title.uppercased().contains(code) {
+                title = "\(code) \(title)"
+            }
+            decision.newBaseName = title
+            decision.reason += "; name suggested by the model"
+        } catch {
+            decision.reason += "; \(error)"
+        }
+        return decision
+    }
+
+    /// A model-suggested name, cleaned up, or nil if it's no good.
+    static func validTitle(_ raw: String) -> String? {
+        var title = raw.trimmingCharacters(in: CharacterSet(charactersIn: " \"'`.\n"))
+        // Models sometimes add an extension anyway.
+        title = title.replacingOccurrences(of: #"\.[A-Za-z0-9]{2,5}$"#, with: "", options: .regularExpression)
+        title = FileNames.sanitize(title)
+        let words = title.split(separator: " ").count
+        guard (1...12).contains(words), title.filter(\.isLetter).count >= 3, !NameQuality.isUnclear(title) else { return nil }
+        return title
     }
 
     /// Sends a decision with an invalid destination to review instead, with an alert.

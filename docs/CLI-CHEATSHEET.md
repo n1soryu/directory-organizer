@@ -12,6 +12,7 @@ Run everything from the project folder: `cd ~/Developer/directory-organizer`.
 | `swift build` | Compile everything (first build takes ~30 s, later ones are quick) |
 | `./scripts/test.sh` | Run all tests |
 | `./scripts/test.sh --filter Apply` | Run only tests whose name contains "Apply" |
+| `FO_LIVE_MODEL=1 ./scripts/test.sh --filter LiveModel` | Also test against the real Apple model (slow; off by default) |
 | `swift run make-testdata` | (Re)build the sandbox: `TestData/Downloads` (26 fake downloads), `TestData/Home` (stand-in home folder), `TestData/expected.json` |
 | `rm -rf .build` | Clear the build cache if the build acts weird |
 
@@ -24,8 +25,10 @@ starts instantly. All examples below work with either.
 |---|---|
 | `swift run organize plan TestData/Downloads` | Show where every file **would** go, and why. Moves nothing |
 | `swift run organize plan TestData/Downloads --json` | Same plan as JSON |
+| `swift run organize plan TestData/Downloads --no-model` | Rules only: files no rule can place go to review (fast) |
+| `swift run organize model` | Is Apple's on-device model available (and can it see images)? |
 | `swift run organize apply TestData/Downloads` | Show the plan, then ask: **[a]** all · **[o]** one by one · **[c]** cancel |
-| `swift run organize apply TestData/Downloads --yes` | Apply everything without asking |
+| `swift run organize apply TestData/Downloads --yes` | Apply everything without asking (`--no-model` works here too) |
 | `swift run organize undo --last` | Put back the most recent batch exactly as it was |
 | `swift run organize undo --batch 6835a73d` | Undo one batch (ID from `organize log`) |
 | `swift run organize undo "Avengers Infinity War.mpeg"` | Undo one file (current **or** original name) |
@@ -44,6 +47,13 @@ starts instantly. All examples below work with either.
    document (3).pdf → ECO201 Course Outline.pdf       ← original name → new name (if renamed)
        85% · NSU · rule: course · Course ECO201: …    ← confidence · tags · who decided · why
 ```
+
+`model: apple` means Apple's model decided; "name suggested by the model" means a rule chose the
+folder and the model chose the name. With the model, a plan takes ~30-40 s for the sandbox
+(a few seconds per model question); `--no-model` takes a few seconds.
+
+If the model isn't available: **System Settings → Siri** (on macOS 27 the Apple Intelligence
+settings are in the Siri pane), then `swift run organize model` to check again.
 
 Alert icons: 🔐 sensitive file · ♊️ duplicate (same content) · ⚠️ name clash (date added) ·
 ❓ unknown course code · ⛔️ destination rejected by the safety checks

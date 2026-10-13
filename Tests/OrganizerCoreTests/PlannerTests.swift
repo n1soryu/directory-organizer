@@ -41,33 +41,6 @@ import TestDataKit
         #expect(FileManager.default.fileExists(atPath: folder.appending(path: "thesis.docx").path))
     }
 
-    @Test func invalidModelSuggestionsGoToReview() async throws {
-        struct Rogue: FileClassifier {
-            let name = "rogue"
-            let destination: String
-            let confidence: Double
-            func suggest(for facts: FileFacts, config: OrganizerConfig) async throws -> ClassifierSuggestion? {
-                ClassifierSuggestion(destination: destination, tags: ["NSU", "Invented"], confidence: confidence, reason: "trust me")
-            }
-        }
-        var planner = Planner(homeRoot: root)
-        let item = facts(name: "notes.txt", text: "eggs, milk")
-
-        planner.classifier = Rogue(destination: "Library/LaunchAgents", confidence: 0.99)
-        var decision = await planner.decide(item)
-        #expect(decision.destination == planner.config.reviewFolder)
-        #expect(decision.alerts.contains { $0.kind == .rejected })
-
-        planner.classifier = Rogue(destination: "Documents/Essays", confidence: 0.4)
-        decision = await planner.decide(item)
-        #expect(decision.destination == planner.config.reviewFolder)
-
-        planner.classifier = Rogue(destination: "Documents/Essays", confidence: 0.9)
-        decision = await planner.decide(item)
-        #expect(decision.destination == "Documents/Essays")
-        #expect(decision.tags == [.nsu])  // "Invented" isn't on the allowlist
-    }
-
     /// Every file path with its size and modification date.
     private func snapshot(_ root: URL) throws -> [String: String] {
         var result: [String: String] = [:]

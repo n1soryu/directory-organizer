@@ -1,40 +1,82 @@
 import Foundation
 
+/// Everything a classifier is given for one file: the facts, and the only answers allowed.
+public struct ClassificationRequest: Sendable {
+    public var facts: FileFacts
+    /// Existing folders it may choose from.
+    public var folders: [FolderOption]
+    /// Where it may propose a new folder (depends on the file type: images under Pictures...).
+    public var newFolderParents: [String]
+    /// Where uncertain files go.
+    public var reviewFolder: String
+}
+
 /// What a model may say about a file: a suggestion, never an action.
 /// The planner checks it (allowed folder, sane name, confidence) before it reaches the plan.
 public struct ClassifierSuggestion: Codable, Sendable {
-    /// Folder relative to the home root, e.g. "Documents/Essays".
+    /// Folder relative to the home root: one of the offered folders, or parent + "/" + new name
+    /// when `isNewFolder` is true.
     public var destination: String
+    public var isNewFolder: Bool
     public var newBaseName: String?
-    public var tags: [String]
     /// 0...1.
     public var confidence: Double
     public var reason: String
 
-    public init(destination: String, newBaseName: String? = nil, tags: [String] = [],
+    public init(destination: String, isNewFolder: Bool = false, newBaseName: String? = nil,
                 confidence: Double, reason: String) {
         self.destination = destination
+        self.isNewFolder = isNewFolder
         self.newBaseName = newBaseName
-        self.tags = tags
         self.confidence = confidence
         self.reason = reason
     }
 }
 
-/// Anything that can suggest where a file belongs: Apple's on-device model, Ollama,
-/// or the stub below. One protocol so they can be swapped and compared.
-public protocol FileClassifier: Sendable {
-    var name: String { get }
-    /// Returns nil when the classifier can't help (e.g. no model available).
-    func suggest(for facts: FileFacts, config: OrganizerConfig) async throws -> ClassifierSuggestion?
+/// A suggested name for a file whose own name says nothing ("IMG_4821", "download").
+public struct NameSuggestion: Codable, Sendable {
+    /// A few words describing the file, without extension or date ("Router login page").
+    public var title: String
+    public var confidence: Double
+
+    public init(title: String, confidence: Double) {
+        self.title = title
+        self.confidence = confidence
+    }
 }
 
-/// Milestone 1 placeholder: no model yet, so leftovers go to review.
+public enum ClassifierError: Error, Equatable, CustomStringConvertible {
+    /// The model can't run right now (turned off, still downloading, no model in use).
+    case unavailable(String)
+    /// The model declined to answer (safety guardrails, refusal).
+    case declined(String)
+
+    public var description: String {
+        switch self {
+        case .unavailable(let why): "model unavailable: \(why)"
+        case .declined(let why): "model declined: \(why)"
+        }
+    }
+}
+
+/// Anything that can suggest where a file belongs and what to call it. Apple's on-device
+/// model implements it; tests use fakes. One protocol so models can be swapped and compared.
+public protocol FileClassifier: Sendable {
+    var name: String { get }
+    func suggest(_ request: ClassificationRequest) async throws -> ClassifierSuggestion
+    func suggestName(for facts: FileFacts) async throws -> NameSuggestion
+}
+
+/// No model: leftovers go to review. Used by tests and `--no-model`.
 public struct StubClassifier: FileClassifier {
-    public let name = "stub"
+    public let name = "none"
     public init() {}
 
-    public func suggest(for facts: FileFacts, config: OrganizerConfig) async throws -> ClassifierSuggestion? {
-        nil
+    public func suggest(_ request: ClassificationRequest) async throws -> ClassifierSuggestion {
+        throw ClassifierError.unavailable("no model in use")
+    }
+
+    public func suggestName(for facts: FileFacts) async throws -> NameSuggestion {
+        throw ClassifierError.unavailable("no model in use")
     }
 }

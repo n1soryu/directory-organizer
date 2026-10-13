@@ -242,6 +242,25 @@ private final class Builder {
         try "eggs\nmilk\nrice\nlentils\n".write(to: file("notes.txt"), atomically: true, encoding: .utf8)
         expect("notes.txt", config.reviewFolder)
 
+        // No folder exists for these yet: the model may propose one ("Manuals", "Bills").
+        try Drawing.textPDF(pages: [
+            "Archer AX55 AX3000 Dual Band Gigabit Wi-Fi 6 Router\nUser Guide\n\nChapter 1: Get to Know About Your Router\nChapter 2: Connect the Hardware\nChapter 3: Log In to Your Router\nChapter 4: Set Up Internet Connection",
+        ], title: "Archer AX55 User Guide", to: file("AX55_UserGuide.pdf"))
+        try from(file("AX55_UserGuide.pdf"), "https://static.tp-link.com/upload/manual/Archer_AX55_UG.pdf")
+        expect("AX55_UserGuide.pdf", config.reviewFolder)
+
+        try Drawing.textPDF(pages: [
+            "Dhaka Electric Supply Company Limited (DESCO)\nElectricity Bill, September 2026\n\nAccount No: 12345678\nBilling period: 01 Sep 2026 to 30 Sep 2026\nUnits consumed: 214 kWh\nAmount payable: BDT 1,842\nDue date: 20 October 2026",
+        ], to: file("bill_sep.pdf"))
+        expect("bill_sep.pdf", config.reviewFolder)
+
+        // A rule knows the course, but the name says nothing: the model names it.
+        let homework = file("download.pdf")
+        try Drawing.textPDF(pages: [
+            "ECO 372 Introduction to Econometrics\nHomework: Instrumental Variables\n\n1. Explain why OLS is inconsistent when a regressor is correlated with the error term.\n2. Estimate the returns to education using distance to college as an instrument.",
+        ], to: homework)
+        expect("download.pdf", "Documents/University/ECO372")
+
         // Still downloading: must be skipped.
         try Data(repeating: 0, count: 100).write(to: file("bigfile.zip.crdownload"))
     }

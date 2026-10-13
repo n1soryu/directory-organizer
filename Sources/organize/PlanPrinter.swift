@@ -46,9 +46,14 @@ struct PlanPrinter {
         let byRules = plan.actions.filter { if case .rule = $0.decidedBy { true } else { false } }.count
         let bySafety = plan.actions.filter { if case .safety = $0.decidedBy { true } else { false } }.count
         let leftovers = plan.actions.count - byRules - bySafety
+        let placedByModel = plan.actions.filter {
+            if case .classifier = $0.decidedBy { $0.destinationFolder != OrganizerConfig().reviewFolder } else { false }
+        }.count
+        let named = plan.actions.filter { $0.reason.contains("name suggested by the model") }.count
         let toReview = plan.actions.filter { $0.destinationFolder == OrganizerConfig().reviewFolder }.count
         Swift.print(bold("\(plan.actions.count) items: ") +
-            "\(byRules) placed by rules, \(bySafety) by safety checks, \(leftovers) left for the model; " +
+            "\(byRules) placed by rules, \(bySafety) by safety checks, \(leftovers) left for the model " +
+            "(\(placedByModel) placed by it); \(named) renamed by the model; " +
             "\(toReview) going to review, \(alerts.count) alert(s).")
     }
 
