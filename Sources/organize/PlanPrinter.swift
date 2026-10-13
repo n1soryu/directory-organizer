@@ -37,6 +37,12 @@ struct PlanPrinter {
             Swift.print("")
         }
 
+        if !plan.waiting.isEmpty {
+            Swift.print(bold("Waiting for a full run (Organize Now)"))
+            for item in plan.waiting { Swift.print("   \(item.name) \(dim("· " + item.reason))") }
+            Swift.print("")
+        }
+
         if !plan.skipped.isEmpty {
             Swift.print(bold("Skipped"))
             for item in plan.skipped { Swift.print("   \(item.name) \(dim("· " + item.reason))") }

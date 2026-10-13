@@ -9,27 +9,60 @@ public struct Planner: Sendable {
     public var extractor = FactExtractor()
     public var rules = RulesEngine.standard
     public var classifier: any FileClassifier = StubClassifier()
+    public var mode: Mode = .full
+
+    public enum Mode: Sendable {
+        /// Rules only: no text recognition, no model. Seconds, not minutes. Files that need
+        /// either become `Plan.waiting` instead of actions.
+        case quick
+        /// Everything: OCR for images and scans, the model for leftovers and unclear names.
+        case full
+    }
+
+    /// Reported after each file, so a long run can show where it is.
+    public struct Progress: Sendable, Equatable {
+        public var done: Int
+        public var total: Int
+        public var file: String
+        public var step: Step
+
+        public enum Step: String, Sendable {
+            case reading = "Reading"
+            case deciding = "Deciding"
+        }
+    }
 
     /// Downloads still in progress (Chrome, Safari, Firefox, Opera): never touched.
     public static let incompleteExtensions: Set<String> = ["crdownload", "download", "part", "partial", "opdownload"]
 
-    public init(config: OrganizerConfig = OrganizerConfig(), homeRoot: URL) {
+    public init(config: OrganizerConfig = OrganizerConfig(), homeRoot: URL, mode: Mode = .full) {
         self.config = config
         self.homeRoot = homeRoot.standardizedFileURL
+        self.mode = mode
+        extractor.recognizeText = mode == .full
     }
 
-    public func plan(folder: URL) async throws -> Plan {
+    /// Plans every item in `folder`. Cancelling the surrounding task stops it between files
+    /// (throws `CancellationError`); planning only reads, so stopping half-way is harmless.
+    public func plan(folder: URL, progress: (@Sendable (Progress) -> Void)? = nil) async throws -> Plan {
         let fm = FileManager.default
         let urls = try fm.contentsOfDirectory(
             at: folder, includingPropertiesForKeys: [.addedToDirectoryDateKey], options: [.skipsHiddenFiles])
 
         var skipped: [SkippedItem] = []
         var facts: [FileFacts] = []
-        for url in urls {
+        let candidates = urls.filter { url in
             if Self.incompleteExtensions.contains(url.pathExtension.lowercased()) {
                 skipped.append(SkippedItem(name: url.lastPathComponent, reason: "download still in progress"))
-                continue
+                return false
             }
+            return true
+        }
+        // Reading and deciding are each half of the work.
+        let total = candidates.count * 2
+        for (index, url) in candidates.enumerated() {
+            try Task.checkCancellation()
+            progress?(Progress(done: index, total: total, file: url.lastPathComponent, step: .reading))
             facts.append(await extractor.facts(for: url))
         }
         // Oldest download first, so the first copy of a duplicate counts as the original.
@@ -45,8 +78,11 @@ public struct Planner: Sendable {
         let folders = FolderCatalog.options(homeRoot: homeRoot, config: config)
         var newFolders: [String: String] = [:]
         var actions: [ProposedAction] = []
+        var waiting: [WaitingItem] = []
 
-        for item in facts {
+        for (index, item) in facts.enumerated() {
+            try Task.checkCancellation()
+            progress?(Progress(done: candidates.count + index, total: total, file: item.name, step: .deciding))
             let decision: Decision
             if let original = copies[item.url] {
                 decision = Decision(
@@ -56,13 +92,27 @@ public struct Planner: Sendable {
                     source: .safety("duplicate"),
                     alerts: [Alert(.duplicate, "Identical to \(original.lastPathComponent), also in this folder")]
                 )
+            } else if mode == .quick, let reason = waitReason(item) {
+                waiting.append(WaitingItem(source: item.url, name: item.name, identity: FileIdentity(item), reason: reason))
+                continue
             } else {
                 decision = await decide(item, folders: folders, newFolders: &newFolders)
             }
             actions.append(resolve(item, decision, &hashes, &reserved))
         }
+        progress?(Progress(done: total, total: total, file: "", step: .deciding))
 
-        return Plan(createdAt: Date(), inputFolder: folder, homeRoot: homeRoot, actions: actions, skipped: skipped)
+        return Plan(createdAt: Date(), inputFolder: folder, homeRoot: homeRoot, actions: actions,
+                    skipped: skipped, waiting: waiting)
+    }
+
+    /// Quick scans: why a file has to wait for a full run, or nil if rules can decide it now.
+    func waitReason(_ facts: FileFacts) -> String? {
+        // Checked before any rule: an unread image could hold a recovery phrase.
+        if facts.needsDeepRead {
+            return facts.kind == .image ? "needs text recognition (could contain sensitive text)" : "scanned pages need text recognition"
+        }
+        return rules.decide(facts, config: config) == nil ? "no rule fits; needs the model" : nil
     }
 
     /// Rules first; the classifier only for files no rule could place. Every answer is checked.
@@ -77,11 +127,18 @@ public struct Planner: Sendable {
         if var decision = rules.decide(facts, config: config) {
             decision = checked(decision)
             if decision.newBaseName == nil, facts.nameIsUnclear, wantsName(decision, facts) {
-                decision = await named(decision, facts)
+                if mode == .full {
+                    decision = await named(decision, facts)
+                } else {
+                    decision.reason += "; Organize Now can suggest a better name"
+                }
             }
             return decision
         }
 
+        guard mode == .full else {
+            return toReview("No rule matched; waiting for Organize Now", confidence: 0)
+        }
         let request = ClassificationRequest(
             facts: facts, folders: folders, newFolderParents: FolderCatalog.newFolderParents(for: facts.kind),
             reviewFolder: config.reviewFolder)

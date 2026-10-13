@@ -9,6 +9,8 @@ public struct FactExtractor: Sendable {
     public var deepTextLimit = 8_000
     /// Plain-text files bigger than this aren't read (logs, data dumps).
     public var maxPlainTextBytes = 512 * 1024
+    /// Text recognition (OCR) for images and scanned PDFs. The slow part; off for quick scans.
+    public var recognizeText = true
 
     public init() {}
 
@@ -59,7 +61,11 @@ public struct FactExtractor: Sendable {
                 facts.isScreenshot = facts.isScreenshot || meta.looksLikeScreenshot
             }
             // OCR every image: it's how a photographed recovery phrase gets caught.
-            facts.setText(await TextRecognizer.text(at: url), source: .imageOCR, limit: limit)
+            if recognizeText {
+                facts.setText(await TextRecognizer.text(at: url), source: .imageOCR, limit: limit)
+            } else {
+                facts.needsDeepRead = true
+            }
         case .video, .audio:
             facts.media = await MediaMetadata.load(url)
         case .archive:
@@ -92,6 +98,10 @@ public struct FactExtractor: Sendable {
 
         // A scan has no text layer: render the first pages and OCR them.
         if (facts.text?.filter { !$0.isWhitespace }.count ?? 0) < 40 {
+            guard recognizeText else {
+                facts.needsDeepRead = true
+                return
+            }
             var ocr = ""
             for page in PDFText.renderPages(facts.url, maxPages: maxPages) {
                 ocr += await TextRecognizer.text(in: page) + "\n"

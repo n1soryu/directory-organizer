@@ -22,6 +22,22 @@ struct PendingView: View {
         @Bindable var model = model
         let rows = filtered
         VStack(spacing: 0) {
+            if !model.waiting.isEmpty && !showRejected {
+                DisclosureGroup {
+                    WaitingList(limit: 8)
+                        .padding(.top, 4)
+                } label: {
+                    HStack {
+                        Label("\(model.waiting.count) file\(model.waiting.count == 1 ? "" : "s") waiting for Organize Now",
+                              systemImage: "wand.and.sparkles")
+                            .foregroundStyle(.purple)
+                        Text("images and scans need text recognition; others need the model")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                .padding(10)
+                .background(.purple.opacity(0.06))
+            }
             Table(rows, selection: $model.selection) {
                 TableColumn("") { action in
                     StatusCell(action: action)

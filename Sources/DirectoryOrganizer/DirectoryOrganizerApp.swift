@@ -19,7 +19,14 @@ struct DirectoryOrganizerApp: App {
         .windowToolbarStyle(.unified)
         .commands {
             CommandGroup(replacing: .newItem) {
-                Button("Scan Now") { model.requestScan() }
+                Button("Organize Now") { model.organizeNow() }
+                    .keyboardShortcut("o", modifiers: [.command, .shift])
+                    .disabled(model.organizing != nil || model.isApplying)
+                Button("Cancel Organize Now") { model.cancelOrganize() }
+                    .keyboardShortcut(".")
+                    .disabled(model.organizing == nil)
+                Divider()
+                Button("Quick Scan") { model.requestScan() }
                     .keyboardShortcut("r")
                 Button("Approve All") { model.approveAll() }
                     .keyboardShortcut(.return, modifiers: [.command, .shift])

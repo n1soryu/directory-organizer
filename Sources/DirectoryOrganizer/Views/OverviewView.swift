@@ -13,6 +13,9 @@ struct OverviewView: View {
                 LazyVGrid(columns: columns, spacing: 12) {
                     StatCard(title: "Pending approval", value: "\(model.pending.count)", systemImage: "tray.full",
                              detail: breakdown, action: { model.page = .pending })
+                    StatCard(title: "Waiting for Organize Now", value: "\(model.waiting.count)", systemImage: "wand.and.sparkles",
+                             tint: .purple, detail: "Images, scans and files that need the model",
+                             action: { model.page = .pending })
                     StatCard(title: "Alerts", value: "\(model.alertActions.count)", systemImage: "exclamationmark.triangle",
                              tint: model.alertActions.isEmpty ? .secondary : .red,
                              detail: alertDetail, action: { model.page = .alerts })
@@ -23,10 +26,15 @@ struct OverviewView: View {
                     StatCard(title: "Moved", value: "\(model.movedRecords.count)", systemImage: "checkmark.circle",
                              tint: .green, detail: "\(model.movedToday) today · all can be undone",
                              action: { model.page = .history })
+                    StatCard(title: "Last Organize Now", value: model.lastFullRun.map { $0.cancelled ? "Cancelled" : $0.date.formatted(date: .omitted, time: .shortened) } ?? "Not yet",
+                             systemImage: "clock", tint: .purple,
+                             detail: model.lastFullRun?.text ?? "Press Organize Now in the menu bar",
+                             action: nil)
                     StatCard(title: "Model", value: modelValue, systemImage: "sparkles", tint: .purple,
                              detail: modelDetail, action: { model.page = .settings })
                     StatCard(title: "Watching", value: model.isWatching ? "On" : "Paused", systemImage: "eye",
-                             tint: model.isWatching ? .green : .orange, detail: model.display(model.watchedURL),
+                             tint: model.isWatching ? .green : .orange,
+                             detail: "Quick scans (rules only) of \(model.display(model.watchedURL))",
                              action: { model.page = .settings })
                 }
 
@@ -53,7 +61,7 @@ struct OverviewView: View {
                 }
 
                 HStack(alignment: .top, spacing: 20) {
-                    DetailSection(title: "Last scan") {
+                    DetailSection(title: "Last quick scan") {
                         VStack(alignment: .leading, spacing: 4) {
                             InfoRow(label: "Folder", value: model.display(model.watchedURL))
                             InfoRow(label: "Files home", value: model.display(model.homeURL))
@@ -63,7 +71,7 @@ struct OverviewView: View {
                             InfoRow(label: "Skipped", value: model.skipped.isEmpty ? "none" : model.skipped.map { "\($0.name) (\($0.reason))" }.joined(separator: ", "))
                         }
                         HStack {
-                            Button("Scan Now", systemImage: "arrow.clockwise") { model.requestScan() }
+                            Button("Quick Scan", systemImage: "arrow.clockwise") { model.requestScan() }
                                 .disabled(model.isScanning)
                             Button(model.isWatching ? "Pause Watching" : "Resume Watching",
                                    systemImage: model.isWatching ? "pause" : "play") { model.setWatching(!model.isWatching) }

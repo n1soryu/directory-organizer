@@ -34,12 +34,23 @@ public struct SkippedItem: Codable, Sendable {
     public var reason: String
 }
 
+/// A file a quick scan couldn't decide: it needs text recognition or the model (Organize Now).
+public struct WaitingItem: Codable, Sendable, Identifiable {
+    public var id: String { source.path }
+    public var source: URL
+    public var name: String
+    public var identity: FileIdentity
+    public var reason: String
+}
+
 public struct Plan: Codable, Sendable {
     public var createdAt: Date
     public var inputFolder: URL
     public var homeRoot: URL
     public var actions: [ProposedAction]
     public var skipped: [SkippedItem]
+    /// Quick scans only: files left for a full run.
+    public var waiting: [WaitingItem] = []
 
     public var alerts: [(action: ProposedAction, alert: Alert)] {
         actions.flatMap { action in action.alerts.map { (action, $0) } }

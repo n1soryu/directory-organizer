@@ -31,7 +31,11 @@ starts instantly. All examples below work with either.
 | `open ~/Library/Application\ Support/DirectoryOrganizer` | The app's settings file |
 | `rm ~/Library/Application\ Support/DirectoryOrganizer/settings.json` | Reset the app's settings (quit it first) |
 
-Keyboard shortcuts in the dashboard: **⌘R** scan now · **⇧⌘↩** approve all.
+Keyboard shortcuts in the dashboard: **⇧⌘O** Organize Now · **⌘.** cancel it · **⌘R** quick scan ·
+**⇧⌘↩** approve all.
+
+The watcher only does **quick scans** (rules, seconds). Images, scans and files that need the model
+wait for **Organize Now** (menu bar button), which does the heavy work and shows its progress.
 
 Developer aids (debug builds):
 
@@ -39,7 +43,9 @@ Developer aids (debug builds):
 |---|---|
 | `DO_SNAPSHOT=/tmp/shots swift run DirectoryOrganizer` | Render every dashboard page and the menu-bar view to PNGs (light + dark), then quit |
 | `DO_SNAPSHOT=/tmp/shots DO_WINDOW=1320x820 swift run DirectoryOrganizer` | Same, at a set window size |
-| `DO_E2E=1 swift run DirectoryOrganizer` | Scripted run: scan, approve all, drop in a new file (the watcher must see it), undo all |
+| `DO_E2E=1 swift run DirectoryOrganizer` | Scripted run: quick scan, a cancelled and a full Organize Now, approve all, drop in a new file (the watcher must see it), undo all |
+
+Both debug runs use a throwaway settings file, never your real one.
 
 ## organize
 
@@ -47,7 +53,8 @@ Developer aids (debug builds):
 |---|---|
 | `swift run organize plan TestData/Downloads` | Show where every file **would** go, and why. Moves nothing |
 | `swift run organize plan TestData/Downloads --json` | Same plan as JSON |
-| `swift run organize plan TestData/Downloads --no-model` | Rules only: files no rule can place go to review (fast) |
+| `swift run organize plan TestData/Downloads --no-model` | Full read, but rules only: files no rule can place go to review |
+| `swift run organize plan TestData/Downloads --quick` | What the app's automatic quick scan sees: no text recognition, no model; lists what waits for Organize Now |
 | `swift run organize model` | Is Apple's on-device model available (and can it see images)? |
 | `swift run organize apply TestData/Downloads` | Show the plan, then ask: **[a]** all · **[o]** one by one · **[c]** cancel |
 | `swift run organize apply TestData/Downloads --yes` | Apply everything without asking (`--no-model` works here too) |

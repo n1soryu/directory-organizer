@@ -32,6 +32,38 @@ struct ActivityEvent: Identifiable {
     }
 }
 
+/// An Organize Now run in progress.
+struct FullRun {
+    let started = Date()
+    var progress: Planner.Progress?
+
+    /// 0...1
+    var fraction: Double {
+        guard let progress, progress.total > 0 else { return 0 }
+        return Double(progress.done) / Double(progress.total)
+    }
+}
+
+/// How the last Organize Now run went.
+struct FullRunSummary {
+    let date: Date
+    let duration: TimeInterval
+    let files: Int
+    let byRules: Int
+    let bySafety: Int
+    let byModel: Int
+    let alerts: Int
+    let toReview: Int
+    let cancelled: Bool
+
+    private var seconds: String { String(format: duration < 10 ? "%.1f" : "%.0f", duration) }
+
+    var text: String {
+        if cancelled { return "Cancelled after \(seconds) s" }
+        return "\(files) files in \(seconds) s: \(byRules) by rules, \(bySafety) by safety checks, \(byModel) by the model; \(alerts) alert\(alerts == 1 ? "" : "s")"
+    }
+}
+
 /// A file in the review folder, with why it's there (from the move log, if the app put it there).
 struct ReviewItem: Identifiable {
     var id: String { url.path }
@@ -87,6 +119,11 @@ final class AppModel {
     /// Files you rejected that are still in the watched folder.
     private(set) var rejected: [ProposedAction] = []
     private(set) var skipped: [SkippedItem] = []
+    /// Files the quick scan couldn't decide: they wait for Organize Now.
+    private(set) var waiting: [WaitingItem] = []
+    /// Set while Organize Now runs.
+    private(set) var organizing: FullRun?
+    private(set) var lastFullRun: FullRunSummary?
     private(set) var records: [MoveRecord] = []
     private(set) var reviewItems: [ReviewItem] = []
     private(set) var folderOptions: [FolderOption] = []
@@ -129,7 +166,10 @@ final class AppModel {
     // MARK: Private
 
     private let notifier = Notifier()
-    private let classifier = CachingClassifier(AppleClassifier())
+    /// Results of the last Organize Now run, per file version. Quick scans reuse them, so
+    /// the model's answers stay until the file changes or leaves the folder.
+    private var deepResults: [FileIdentity: ProposedAction] = [:]
+    private var organizeTask: Task<Void, Never>?
     private var watcher: FolderWatcher?
     private var scanRequested = false
     private var knownPendingIDs = Set<String>()
@@ -137,8 +177,17 @@ final class AppModel {
     private var reminderTask: Task<Void, Never>?
     private var started = false
 
+    /// Debug runs (DO_SNAPSHOT, DO_E2E) use a throwaway settings file, never yours.
+    static let settingsURL: URL = {
+        let env = ProcessInfo.processInfo.environment
+        guard env["DO_SNAPSHOT"] != nil || env["DO_E2E"] != nil else { return AppSettings.defaultURL }
+        let url = FileManager.default.temporaryDirectory.appending(path: "directory-organizer-debug-settings.json")
+        try? FileManager.default.removeItem(at: url)
+        return url
+    }()
+
     private init() {
-        settings = AppSettings.load()
+        settings = AppSettings.load(from: Self.settingsURL)
     }
 
     /// Called once at launch.
@@ -163,7 +212,7 @@ final class AppModel {
     /// Asks for a scan. If one is running, another runs right after it (changes are never missed,
     /// and a burst of changes causes at most one extra scan).
     func requestScan() {
-        if isScanning { scanRequested = true; return }
+        if isScanning || organizing != nil { scanRequested = true; return }
         Task { await scan() }
     }
 
@@ -180,11 +229,8 @@ final class AppModel {
         let started = Date()
         defer { isScanning = false }
 
-        refreshModelStatus()
-        var planner = Planner(homeRoot: homeURL)
-        if settings.useModel, modelUnavailableReason == nil {
-            planner.classifier = classifier
-        }
+        // Quick scan: rules only, no text recognition, no model. Heavy work waits for Organize Now.
+        let planner = Planner(homeRoot: homeURL, mode: .quick)
         let plan: Plan
         do {
             plan = try await planner.plan(folder: watchedURL)
@@ -193,11 +239,18 @@ final class AppModel {
             return
         }
 
+        // Where Organize Now already analysed a file (and it hasn't changed), its result wins.
+        let present = Set(plan.actions.map(FileIdentity.init) + plan.waiting.map(\.identity))
+        deepResults = deepResults.filter { present.contains($0.key) }
+        let allActions = plan.actions.map { deepResults[FileIdentity($0)] ?? $0 }
+            + plan.waiting.compactMap { deepResults[$0.identity] }
+        waiting = plan.waiting.filter { deepResults[$0.identity] == nil }
+
         let rejectedIDs = Set(settings.rejected)
-        pending = plan.actions.filter { !rejectedIDs.contains(FileIdentity($0)) }
-        rejected = plan.actions.filter { rejectedIDs.contains(FileIdentity($0)) }
+        pending = allActions.filter { !rejectedIDs.contains(FileIdentity($0)) }
+        rejected = allActions.filter { rejectedIDs.contains(FileIdentity($0)) }
         // Forget rejections for files that are gone or changed.
-        let current = Set(plan.actions.map(FileIdentity.init))
+        let current = Set(allActions.map(FileIdentity.init))
         if settings.rejected.contains(where: { !current.contains($0) }) {
             settings.rejected.removeAll { !current.contains($0) }
         }
@@ -219,6 +272,69 @@ final class AppModel {
             scanRequested = false
             await scan()
         }
+    }
+
+    // MARK: - Organize Now
+
+    /// The full run: text recognition for images and scans, the model for leftovers and
+    /// unclear names, all asked fresh.
+    func organizeNow() {
+        guard organizing == nil, !isUsingRealFolders else { return }
+        organizing = FullRun()
+        organizeTask = Task { await runFullOrganize() }
+    }
+
+    func cancelOrganize() {
+        organizeTask?.cancel()
+    }
+
+    private func runFullOrganize() async {
+        while isScanning { try? await Task.sleep(for: .milliseconds(100)) }
+        let started = Date()
+        refreshModelStatus()
+        var planner = Planner(homeRoot: homeURL, mode: .full)
+        if settings.useModel, modelUnavailableReason == nil {
+            planner.classifier = AppleClassifier()
+        }
+        let fullPlanner = planner
+        let folder = watchedURL
+        log(.info, "Organize Now started\(planner.classifier is StubClassifier ? " (without the model)" : "")")
+
+        do {
+            let plan = try await fullPlanner.plan(folder: folder) { progress in
+                Task { @MainActor in AppModel.shared.organizing?.progress = progress }
+            }
+            deepResults = Dictionary(plan.actions.map { (FileIdentity($0), $0) }, uniquingKeysWith: { $1 })
+            let summary = FullRunSummary(
+                date: Date(), duration: Date().timeIntervalSince(started), files: plan.actions.count,
+                byRules: plan.actions.filter { if case .rule = $0.decidedBy { true } else { false } }.count,
+                bySafety: plan.actions.filter { if case .safety = $0.decidedBy { true } else { false } }.count,
+                // Placed or named by the model; "none" is the no-model stand-in, not a decision.
+                byModel: plan.actions.filter {
+                    if case .classifier(let name) = $0.decidedBy { name != "none" } else { $0.reason.contains("by the model") }
+                }.count,
+                alerts: plan.actions.filter { !$0.alerts.isEmpty }.count,
+                toReview: plan.actions.filter { $0.destinationFolder == OrganizerConfig().reviewFolder }.count,
+                cancelled: false)
+            lastFullRun = summary
+            organizing = nil
+            log(.success, "Organize Now finished: \(summary.text)")
+            await notifier.send(title: "Organize Now finished",
+                                body: summary.text + ". Ready for your approval.", page: .pending)
+        } catch {
+            let cancelled = error is CancellationError
+            lastFullRun = FullRunSummary(date: Date(), duration: Date().timeIntervalSince(started), files: 0, byRules: 0,
+                                         bySafety: 0, byModel: 0, alerts: 0, toReview: 0, cancelled: cancelled)
+            organizing = nil
+            if cancelled {
+                log(.warning, "Organize Now cancelled; nothing was changed")
+            } else {
+                show(.error, "Organize Now failed: \(error.localizedDescription)")
+            }
+        }
+        // Fold the results into the plan (and catch up on anything that arrived meanwhile).
+        scanRequested = false
+        await scan()
     }
 
     private func notifyAbout(_ newOnes: [ProposedAction]) async {
@@ -457,6 +573,6 @@ final class AppModel {
     }
 
     private func saveSettings() {
-        do { try settings.save() } catch { log(.error, "Couldn't save settings: \(error.localizedDescription)") }
+        do { try settings.save(to: Self.settingsURL) } catch { log(.error, "Couldn't save settings: \(error.localizedDescription)") }
     }
 }

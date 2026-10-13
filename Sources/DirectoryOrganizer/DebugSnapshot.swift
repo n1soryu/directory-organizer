@@ -38,13 +38,21 @@ enum DebugSnapshot {
                 }
             }
             await captureMenuBarView(model: model, to: "\(outDir)/menubar")
+            model.organizeNow()
+            // Early in the run: text recognition of the images is the slow part.
+            while (model.organizing?.progress?.done ?? 0) < 2, model.organizing != nil {
+                try? await Task.sleep(for: .milliseconds(50))
+            }
+            await captureMenuBarView(model: model, to: "\(outDir)/menubar-running")
+            model.cancelOrganize()
             NSApp.terminate(nil)
         }
         return true
     }
 
     /// `DO_E2E=1`: drives the app model like a user would, on the sandbox, and prints what happened:
-    /// scan, approve all, a new download arrives (the watcher must notice), undo everything.
+    /// quick scan, Organize Now (and a cancelled one), approve all, a new download arrives
+    /// (the watcher must notice), undo everything.
     @MainActor private static func endToEnd(model: AppModel) {
         func say(_ text: String) { print("e2e: \(text)"); fflush(stdout) }
         func settle() async {
@@ -52,12 +60,27 @@ enum DebugSnapshot {
             while model.isScanning || model.isApplying { try? await Task.sleep(for: .milliseconds(200)) }
         }
         Task { @MainActor in
-            let original = model.settings
-            defer { model.settings = original }   // leave your saved settings as they were
-            model.settings.useModel = false       // fast and repeatable; the model has its own tests
+            model.settings.useModel = false   // fast and repeatable (a throwaway settings file)
             model.start()
             await settle()
-            say("scanned: \(model.pending.count) pending, \(model.alertActions.count) with alerts, watching=\(model.isWatching)")
+            say("quick scan: \(model.pending.count) pending, \(model.waiting.count) waiting for Organize Now, \(model.alertActions.count) with alerts, watching=\(model.isWatching)")
+
+            model.organizeNow()
+            try? await Task.sleep(for: .milliseconds(300))
+            model.cancelOrganize()
+            while model.organizing != nil { try? await Task.sleep(for: .milliseconds(100)) }
+            await settle()
+            say("cancelled run: cancelled=\(model.lastFullRun?.cancelled == true), still waiting \(model.waiting.count)")
+
+            model.organizeNow()
+            var maxProgress = 0.0
+            while model.organizing != nil {
+                maxProgress = max(maxProgress, model.organizing?.fraction ?? 0)
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+            await settle()
+            let secure = model.pending.first { $0.originalName == "IMG_5012.jpg" }?.destinationFolder ?? "-"
+            say("Organize Now: progress reached \(Int(maxProgress * 100))%, \(model.lastFullRun?.text ?? "-"); now \(model.pending.count) pending, \(model.waiting.count) waiting; IMG_5012.jpg → \(secure)")
 
             model.reject([model.pending.first { $0.originalName == "notes.txt" }!.id])
             model.approveAll()
@@ -78,7 +101,6 @@ enum DebugSnapshot {
             say("undone: \(model.movedRecords.count) still moved, \(model.pending.count) pending again")
             try? FileManager.default.removeItem(at: incoming)
             say("activity log: \(model.activity.count) events, newest: \(model.activity.first?.text ?? "-")")
-            model.settings = original
             NSApp.terminate(nil)
         }
     }
@@ -88,6 +110,7 @@ enum DebugSnapshot {
         let host = NSHostingView(rootView: MenuBarView().environment(model))
         let window = NSWindow(contentRect: NSRect(origin: .zero, size: host.fittingSize),
                               styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false   // ARC owns it; AppKit releasing it too would crash
         window.contentView = host
         window.orderFront(nil)
         for (suffix, appearance) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {

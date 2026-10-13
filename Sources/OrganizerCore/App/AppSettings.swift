@@ -12,6 +12,12 @@ public struct FileIdentity: Codable, Hashable, Sendable {
         size = action.sourceSize
         modified = action.sourceModified
     }
+
+    public init(_ facts: FileFacts) {
+        path = facts.url.path
+        size = facts.size
+        modified = facts.modified
+    }
 }
 
 /// Which kinds of rule decisions may be applied without asking. Off by default. Only

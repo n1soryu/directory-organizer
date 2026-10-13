@@ -20,7 +20,7 @@ A wrong guess sends the file to the review folder; it is never lost.
 | 2 | Apply moves, undo log, Finder tags, safety checks, creating folders and renaming | ✅ |
 | 3 | Apple's on-device model for leftovers: folders, new folders, names (text and images) | ✅ |
 | 4 | Menu-bar app + dashboard, Downloads watcher, approval UI, notifications, review reminder every 8 hours | ✅ |
-| 5 | Night runs: plugged in, idle, cool, within a time window | next |
+| 5 | Organize Now: the heavy work (text recognition + model) on demand from the menu bar | ✅ |
 | 6 | Evaluation on a labeled test set: rules only vs rules + model | |
 
 ## Try it
@@ -144,18 +144,38 @@ Swift then checks every answer:
   otherwise). If the original name has been taken since, the file comes back with the date
   added rather than overwriting.
 
+## Quick scans and Organize Now
+
+The app splits the work in two:
+
+- **Quick scan, automatic.** Whenever something lands in the watched folder: rules only, no text
+  recognition, no model, so it takes seconds and barely uses the Mac. Courses, records, films,
+  installers, password exports, duplicates and the like show up ready to approve right away.
+- **Organize Now, when you press it** (menu bar, dashboard toolbar, or ⇧⌘O). The heavy work:
+  text recognition for images and scanned PDFs, and Apple's model for files no rule fits and for
+  unclear names, asked fresh. Progress shows in the menu bar (percentage, current file and step,
+  elapsed time) with **Cancel** (⌘.); cancelling is safe because planning only reads. A
+  notification summarizes the run, and its results stick to each file until it changes.
+
+Files the quick scan can't decide are listed as **waiting for Organize Now**. Every image and
+scan waits, even an ordinary-looking photo: without text recognition a photographed recovery
+phrase can't be told apart from a holiday picture, so nothing unread is ever filed.
+
+`organize plan <folder> --quick` shows what the quick scan sees.
+
 ## The app (menu bar + dashboard)
 
-**Menu bar (compact):** status (watching / scanning / paused), counts (pending, alerts, in review,
-moved today), the top alerts, the next files with ✓ approve / ✕ reject, Approve All, Scan, Pause,
+**Menu bar (compact):** status (watching / scanning / paused), **Organize Now** (with how many
+files are waiting, or the progress and Cancel while it runs) and the last run's summary, counts
+(pending, waiting, alerts, in review), the top alerts, the next files with ✓ approve / ✕ reject, Approve All, Scan, Pause,
 Open Dashboard.
 
 **Dashboard (detailed):**
 
 | Page | Shows |
 |---|---|
-| Overview | counts, what needs attention, last scan (folder, time, duration, skipped files), how files were decided (by rule, safety check, model), live activity log |
-| Pending Approval | every proposed move in a table: alerts, file, destination (new folders marked), new name, tags, confidence, who decided. Filters (needs attention, model, rules, to review), search, approve/reject selected or all, rejected files. The detail panel has a Quick Look preview, the plan, alerts explained, and **every fact read from the file**: source URLs, dates, title, pages, image info, archive contents, and the text or OCR the decision was based on |
+| Overview | counts (including waiting for Organize Now and the last run), what needs attention, last quick scan (folder, time, duration, skipped files), how files were decided (by rule, safety check, model), live activity log |
+| Pending Approval | files waiting for Organize Now (collapsible), then every proposed move in a table: alerts, file, destination (new folders marked), new name, tags, confidence, who decided. Filters (needs attention, model, rules, to review), search, approve/reject selected or all, rejected files. The detail panel has a Quick Look preview, the plan, alerts explained, and **every fact read from the file**: source URLs, dates, title, pages, image info, archive contents, and the text or OCR the decision was based on |
 | Alerts | grouped by kind (sensitive, duplicate, rejected suggestion, name clash, unknown course), each explained |
 | History | every batch and move from the log, with undo per move or per batch |
 | Review Folder | what's waiting in `To Delete (Review)` and why, put-back, reminder schedule |
@@ -164,8 +184,8 @@ Open Dashboard.
 
 **How it runs:**
 - **Watching:** FSEvents on the watched folder. A burst of changes (a download being written)
-  becomes one rescan a few seconds later; a scan requested during a scan runs right after it.
-- **Model answers are cached** per file version, so rescans don't ask about the same file again.
+  becomes one quick scan a few seconds later; a scan requested during a scan (or during
+  Organize Now) runs right after it.
 - **Rejected files** stay where they are and stay out of the plan until they change.
 - **Notifications:** sensitive files right away, new files ready to file (when the app isn't in
   front), auto-filed files, and the **review folder reminder every 8 hours** while it isn't empty
@@ -176,8 +196,9 @@ Open Dashboard.
   and Music, even if chosen in Settings. Settings shows the permission status for them
   ("Check Access" triggers the macOS prompts) and links to Full Disk Access, for when real use is
   switched on.
-- Settings are saved in `~/Library/Application Support/DirectoryOrganizer/settings.json`; the
-  move log is shared with the `organize` command (`TestData/moves.jsonl`).
+- Settings are saved in `~/Library/Application Support/DirectoryOrganizer/settings.json`
+  (debug runs use a throwaway copy); the move log is shared with the `organize` command
+  (`TestData/moves.jsonl`).
 
 ## Layout
 

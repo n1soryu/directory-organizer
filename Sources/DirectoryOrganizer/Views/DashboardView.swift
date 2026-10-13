@@ -35,6 +35,12 @@ struct DashboardView: View {
                 page
             }
             .navigationTitle(model.page.title)
+            .toolbar {
+                ToolbarItem(placement: .navigation) {
+                    OrganizeNowControl(compact: true)
+                        .frame(minWidth: model.organizing == nil ? nil : 260)
+                }
+            }
         }
         .onAppear {
             model.openDashboardAction = { [openWindow] in openWindow(id: "dashboard") }
@@ -72,7 +78,10 @@ struct StatusFooter: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
-                if model.isScanning || model.isApplying {
+                if let run = model.organizing {
+                    ProgressView().controlSize(.small)
+                    Text("Organizing… \(Int(run.fraction * 100))%")
+                } else if model.isScanning || model.isApplying {
                     ProgressView().controlSize(.small)
                     Text(model.isApplying ? "Moving files…" : "Scanning…")
                 } else {
@@ -122,8 +131,13 @@ struct MenuBarLabel: View {
     var body: some View {
         let count = model.pending.count
         HStack(spacing: 3) {
-            Image(systemName: model.alertActions.isEmpty ? (count > 0 ? "tray.full" : "tray") : "tray.full.fill")
-            if count > 0 { Text("\(count)") }
+            if let run = model.organizing {
+                Image(systemName: "wand.and.sparkles")
+                Text("\(Int(run.fraction * 100))%")
+            } else {
+                Image(systemName: model.alertActions.isEmpty ? (count > 0 ? "tray.full" : "tray") : "tray.full.fill")
+                if count > 0 { Text("\(count)") }
+            }
         }
     }
 }
@@ -141,11 +155,17 @@ struct MenuBarView: View {
                 StatusPill()
             }
 
+            OrganizeNowControl()
+            if let last = model.lastFullRun, model.organizing == nil {
+                Text("Last run \(last.date.relative): \(last.text)")
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(2)
+            }
+
             HStack(spacing: 8) {
                 MiniStat(value: model.pending.count, label: "Pending", tint: .accentColor) { show(.pending) }
+                MiniStat(value: model.waiting.count, label: "Waiting", tint: .purple) { show(.pending) }
                 MiniStat(value: model.alertActions.count, label: "Alerts", tint: .red) { show(.alerts) }
                 MiniStat(value: model.reviewItems.count, label: "In review", tint: .orange) { show(.review) }
-                MiniStat(value: model.movedToday, label: "Moved today", tint: .green) { show(.history) }
             }
 
             if !model.alertActions.isEmpty {
@@ -161,7 +181,9 @@ struct MenuBarView: View {
             }
 
             if model.pending.isEmpty {
-                Text(model.isScanning ? "Scanning \(model.display(model.watchedURL))…" : "Nothing waiting. New downloads appear here.")
+                Text(model.isScanning ? "Scanning \(model.display(model.watchedURL))…"
+                     : model.waiting.isEmpty ? "Nothing waiting. New downloads appear here."
+                     : "Nothing ready yet: press Organize Now for the files that need a full read.")
                     .foregroundStyle(.secondary)
                     .font(.callout)
             } else {

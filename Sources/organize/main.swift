@@ -5,8 +5,10 @@ let usage = """
     organize: sorts downloads into your folders. Nothing moves without your approval.
 
     Usage:
-      organize plan <folder> [--home <folder>] [--json] [--no-model]
+      organize plan <folder> [--home <folder>] [--json] [--no-model] [--quick]
           Show where every item in <folder> would go. Moves nothing.
+          --quick      what the app's automatic scan sees: rules only, no text recognition,
+                       no model; images, scans and leftovers are listed as waiting
       organize apply <folder> [--home <folder>] [--yes] [--no-model]
           Show the plan, ask for approval (all / one by one / cancel), then move and tag.
           --yes        approve everything without asking
@@ -104,9 +106,9 @@ struct Arguments {
     }
 }
 
-func makePlan(_ folder: URL, _ home: URL, useModel: Bool) async -> Plan {
-    var planner = Planner(homeRoot: home)
-    if useModel {
+func makePlan(_ folder: URL, _ home: URL, useModel: Bool, quick: Bool = false) async -> Plan {
+    var planner = Planner(homeRoot: home, mode: quick ? .quick : .full)
+    if useModel, !quick {
         planner.classifier = AppleClassifier()
         if let reason = AppleClassifier.unavailableReason() {
             FileHandle.standardError.write(Data("note: Apple's model isn't available (\(reason)); files no rule can place go to review.\n".utf8))
@@ -129,7 +131,8 @@ switch command {
 case "plan":
     let arguments = Arguments(args)
     let (folder, home) = arguments.folders()
-    let plan = await makePlan(folder, home, useModel: !arguments.flags.contains("--no-model"))
+    let plan = await makePlan(folder, home, useModel: !arguments.flags.contains("--no-model"),
+                              quick: arguments.flags.contains("--quick"))
     if arguments.flags.contains("--json") {
         print(String(decoding: try encoder().encode(plan), as: UTF8.self))
     } else {

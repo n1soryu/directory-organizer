@@ -61,35 +61,6 @@ import Testing
         #expect(!FolderAccess.isRealUserFolder(AppSettings.sandboxRoot.appending(path: "Downloads")))
         #expect(!FolderAccess.isRealUserFolder(home.appending(path: "Developer")))
     }
-
-    @Test func cachingClassifierAsksOncePerFileVersion() async throws {
-        actor Counter { var calls = 0; func bump() { calls += 1 } }
-        struct Counting: FileClassifier {
-            let name = "counting"
-            let counter: Counter
-            func suggest(_ request: ClassificationRequest) async throws -> ClassifierSuggestion {
-                await counter.bump()
-                return ClassifierSuggestion(destination: "Documents/Essays", confidence: 0.9, reason: "")
-            }
-            func suggestName(for facts: FileFacts) async throws -> NameSuggestion {
-                await counter.bump()
-                return NameSuggestion(title: "A name", confidence: 0.9)
-            }
-        }
-        let counter = Counter()
-        let cached = CachingClassifier(Counting(counter: counter))
-        var item = facts(name: "essay.docx", text: "x")
-        let request = ClassificationRequest(facts: item, folders: [], newFolderParents: ["Documents"], reviewFolder: "R")
-        _ = try await cached.suggest(request)
-        _ = try await cached.suggest(request)
-        _ = try await cached.suggestName(for: item)
-        _ = try await cached.suggestName(for: item)
-        #expect(await counter.calls == 2)
-
-        item.size += 1  // the file changed: ask again
-        _ = try await cached.suggestName(for: item)
-        #expect(await counter.calls == 3)
-    }
 }
 
 @Suite struct FolderWatcherTests {

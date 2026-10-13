@@ -283,3 +283,71 @@ extension Date {
 extension Int64 {
     var fileSize: String { ByteCountFormatter.string(fromByteCount: self, countStyle: .file) }
 }
+
+// MARK: - Organize Now
+
+/// Starts the full run (text recognition + model), or shows its progress with Cancel.
+struct OrganizeNowControl: View {
+    @Environment(AppModel.self) private var model
+    var compact = false
+
+    var body: some View {
+        if let run = model.organizing {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    ProgressView(value: run.fraction)
+                    Text("\(Int(run.fraction * 100))%").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                    Button("Cancel") { model.cancelOrganize() }
+                        .controlSize(.small)
+                }
+                if let progress = run.progress, !progress.file.isEmpty {
+                    Text("\(progress.step.rawValue) \(progress.file)")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .lineLimit(1).truncationMode(.middle)
+                }
+                TimelineView(.periodic(from: run.started, by: 1)) { context in
+                    Text("Running for \(Int(context.date.timeIntervalSince(run.started))) s")
+                        .font(.caption2).foregroundStyle(.tertiary)
+                }
+            }
+        } else {
+            Button {
+                model.organizeNow()
+            } label: {
+                Label(compact ? "Organize Now" : organizeTitle, systemImage: "wand.and.sparkles")
+                    .frame(maxWidth: compact ? nil : .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(compact ? .regular : .large)
+            .disabled(model.isApplying || model.isUsingRealFolders)
+            .help("Read everything in full (text recognition) and ask the model about files no rule can place")
+        }
+    }
+
+    private var organizeTitle: String {
+        model.waiting.isEmpty ? "Organize Now" : "Organize Now (\(model.waiting.count) waiting)"
+    }
+}
+
+/// Files the quick scan left for Organize Now.
+struct WaitingList: View {
+    @Environment(AppModel.self) private var model
+    var limit = 50
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(model.waiting.prefix(limit)) { item in
+                HStack(spacing: 6) {
+                    FileIcon(url: item.source)
+                    Text(item.name).lineLimit(1).truncationMode(.middle)
+                    Spacer()
+                    Text(item.reason).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+                .font(.callout)
+            }
+            if model.waiting.count > limit {
+                Text("and \(model.waiting.count - limit) more").font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+}
