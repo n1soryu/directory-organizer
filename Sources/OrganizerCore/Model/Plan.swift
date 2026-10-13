@@ -21,6 +21,8 @@ public struct ProposedAction: Codable, Sendable, Identifiable {
     public var alerts: [Alert]
     /// Folders (relative to the home root) that don't exist yet and would be created.
     public var createsFolders: [String]
+    /// Everything read from the file, for showing in the app.
+    public var facts: FileFacts?
 
     public var isRenamed: Bool { finalName != originalName }
     public var destinationPath: String { destinationFolder + "/" + finalName }

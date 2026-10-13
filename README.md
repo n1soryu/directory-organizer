@@ -19,13 +19,15 @@ A wrong guess sends the file to the review folder; it is never lost.
 | 1 | Fact extraction, rules engine, plan-only CLI, stub classifier | ✅ |
 | 2 | Apply moves, undo log, Finder tags, safety checks, creating folders and renaming | ✅ |
 | 3 | Apple's on-device model for leftovers: folders, new folders, names (text and images) | ✅ |
-| 4 | Menu-bar app, Downloads watcher, approval UI, review-folder reminder every 8 hours | next |
-| 5 | Night runs: plugged in, idle, cool, within a time window | |
+| 4 | Menu-bar app + dashboard, Downloads watcher, approval UI, notifications, review reminder every 8 hours | ✅ |
+| 5 | Night runs: plugged in, idle, cool, within a time window | next |
 | 6 | Evaluation on a labeled test set: rules only vs rules + model | |
 
 ## Try it
 
-Needs macOS 27 and Swift 6 (the Command Line Tools are enough; Xcode isn't required).
+Needs macOS 27 and Swift 6 (the Command Line Tools are enough; Xcode isn't required). One quirk:
+the macOS 27 SDK declares SwiftUI's `@State` also as a macro whose plugin only ships with Xcode,
+so the app uses `@ViewState` (an alias for the property wrapper).
 
 ```sh
 swift run make-testdata                      # builds TestData/Downloads and TestData/Home
@@ -35,6 +37,15 @@ swift run organize undo --last               # puts the last batch back exactly 
 swift run organize log                       # history of moves and undos
 ./scripts/test.sh                            # runs the tests
 ```
+
+### The app
+
+```sh
+./scripts/build-app.sh --open    # builds build/Directory Organizer.app and opens it
+```
+
+A tray icon appears in the menu bar (with the number of files waiting) and the dashboard opens.
+Notifications only work in this bundled app, not with `swift run`.
 
 All commands, plus macOS commands for checking tags and attributes: **[docs/CLI-CHEATSHEET.md](docs/CLI-CHEATSHEET.md)**.
 
@@ -133,6 +144,41 @@ Swift then checks every answer:
   otherwise). If the original name has been taken since, the file comes back with the date
   added rather than overwriting.
 
+## The app (menu bar + dashboard)
+
+**Menu bar (compact):** status (watching / scanning / paused), counts (pending, alerts, in review,
+moved today), the top alerts, the next files with ✓ approve / ✕ reject, Approve All, Scan, Pause,
+Open Dashboard.
+
+**Dashboard (detailed):**
+
+| Page | Shows |
+|---|---|
+| Overview | counts, what needs attention, last scan (folder, time, duration, skipped files), how files were decided (by rule, safety check, model), live activity log |
+| Pending Approval | every proposed move in a table: alerts, file, destination (new folders marked), new name, tags, confidence, who decided. Filters (needs attention, model, rules, to review), search, approve/reject selected or all, rejected files. The detail panel has a Quick Look preview, the plan, alerts explained, and **every fact read from the file**: source URLs, dates, title, pages, image info, archive contents, and the text or OCR the decision was based on |
+| Alerts | grouped by kind (sensitive, duplicate, rejected suggestion, name clash, unknown course), each explained |
+| History | every batch and move from the log, with undo per move or per batch |
+| Review Folder | what's waiting in `To Delete (Review)` and why, put-back, reminder schedule |
+| Folders | the folders files can go to, what each is for, its tags, item counts, folders the app created |
+| Settings | folders (sandbox only), watching, model on/off and status, auto-apply per category, notifications and reminder interval, access to your real folders |
+
+**How it runs:**
+- **Watching:** FSEvents on the watched folder. A burst of changes (a download being written)
+  becomes one rescan a few seconds later; a scan requested during a scan runs right after it.
+- **Model answers are cached** per file version, so rescans don't ask about the same file again.
+- **Rejected files** stay where they are and stay out of the plan until they change.
+- **Notifications:** sensitive files right away, new files ready to file (when the app isn't in
+  front), auto-filed files, and the **review folder reminder every 8 hours** while it isn't empty
+  (4/8/12/24 h in Settings). Clicking one opens the matching dashboard page.
+- **Auto-apply** (off by default, per category): only rule decisions at 90%+ with no alerts.
+  Model decisions, sensitive files and duplicates always wait for you.
+- **Real folders stay locked:** the app refuses ~/Downloads, Documents, Desktop, Pictures, Movies
+  and Music, even if chosen in Settings. Settings shows the permission status for them
+  ("Check Access" triggers the macOS prompts) and links to Full Disk Access, for when real use is
+  switched on.
+- Settings are saved in `~/Library/Application Support/DirectoryOrganizer/settings.json`; the
+  move log is shared with the `organize` command (`TestData/moves.jsonl`).
+
 ## Layout
 
 ```
@@ -147,6 +193,8 @@ Sources/OrganizerCore/   facts, safety, rules, planning, applying (no UI)
   Config/      folder layout, record types, NSU course catalog, FolderCatalog (folders offered to the model)
 Sources/TestDataKit/     generates realistic fake downloads + expected results
 Sources/organize/        the CLI (plan, apply, undo, log, model, facts)
+Sources/DirectoryOrganizer/  the menu-bar app: AppModel (state, scans, moves), Views/ (dashboard pages)
+  App/ (in OrganizerCore) FolderWatcher (FSEvents), AppSettings, AutoApplyPolicy, ReviewReminder
 docs/CLI-CHEATSHEET.md   every command in one place
 ```
 

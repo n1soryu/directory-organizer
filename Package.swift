@@ -8,6 +8,7 @@ let package = Package(
     products: [
         .executable(name: "organize", targets: ["organize"]),
         .executable(name: "make-testdata", targets: ["make-testdata"]),
+        .executable(name: "DirectoryOrganizer", targets: ["DirectoryOrganizer"]),
     ],
     targets: [
         // Pure logic: reading facts, safety checks, rules and planning.
@@ -22,6 +23,9 @@ let package = Package(
         .executableTarget(name: "organize", dependencies: ["OrganizerCore"]),
 
         .executableTarget(name: "make-testdata", dependencies: ["TestDataKit"]),
+
+        // Milestone 4: the menu-bar app with its dashboard window.
+        .executableTarget(name: "DirectoryOrganizer", dependencies: ["OrganizerCore"]),
 
         .testTarget(
             name: "OrganizerCoreTests",

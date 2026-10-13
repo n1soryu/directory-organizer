@@ -296,7 +296,8 @@ public struct Planner: Sendable {
             reason: decision.reason,
             decidedBy: decision.source,
             alerts: decision.alerts,
-            createsFolders: newFolders
+            createsFolders: newFolders,
+            facts: facts
         )
     }
 

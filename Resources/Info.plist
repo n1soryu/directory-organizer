@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDisplayName</key>
+	<string>Directory Organizer</string>
+	<key>CFBundleExecutable</key>
+	<string>DirectoryOrganizer</string>
+	<key>CFBundleIdentifier</key>
+	<string>io.github.n1soryu.directory-organizer</string>
+	<key>CFBundleName</key>
+	<string>Directory Organizer</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.4.0</string>
+	<key>CFBundleVersion</key>
+	<string>4</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.productivity</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>27.0</string>
+	<!-- Menu-bar app: no Dock icon until the dashboard is open. -->
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSHumanReadableCopyright</key>
+	<string>Copyright © 2026 n1soryu.</string>
+</dict>
+</plist>

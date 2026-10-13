@@ -19,6 +19,28 @@ Run everything from the project folder: `cd ~/Developer/directory-organizer`.
 `swift run organize …` rebuilds first if needed. After a `swift build`, `.build/debug/organize …`
 starts instantly. All examples below work with either.
 
+## The app
+
+| Command | What it does |
+|---|---|
+| `./scripts/build-app.sh` | Build `build/Directory Organizer.app` (release, signed for this Mac) |
+| `./scripts/build-app.sh --open` | Build it, quit the running copy, open the new one |
+| `open "build/Directory Organizer.app"` | Open the app (menu-bar tray icon + dashboard) |
+| `pkill -x DirectoryOrganizer` | Quit it from the terminal (or: menu bar → Quit) |
+| `swift run DirectoryOrganizer` | Run without bundling (no notifications, shows a Dock icon) |
+| `open ~/Library/Application\ Support/DirectoryOrganizer` | The app's settings file |
+| `rm ~/Library/Application\ Support/DirectoryOrganizer/settings.json` | Reset the app's settings (quit it first) |
+
+Keyboard shortcuts in the dashboard: **⌘R** scan now · **⇧⌘↩** approve all.
+
+Developer aids (debug builds):
+
+| Command | What it does |
+|---|---|
+| `DO_SNAPSHOT=/tmp/shots swift run DirectoryOrganizer` | Render every dashboard page and the menu-bar view to PNGs (light + dark), then quit |
+| `DO_SNAPSHOT=/tmp/shots DO_WINDOW=1320x820 swift run DirectoryOrganizer` | Same, at a set window size |
+| `DO_E2E=1 swift run DirectoryOrganizer` | Scripted run: scan, approve all, drop in a new file (the watcher must see it), undo all |
+
 ## organize
 
 | Command | What it does |

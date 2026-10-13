@@ -1,0 +1,117 @@
+import OrganizerCore
+import SwiftUI
+
+/// Every move and undo from the log, grouped by batch. Anything still in place can be undone.
+struct HistoryView: View {
+    @Environment(AppModel.self) private var model
+    @ViewState private var showUndone = true
+
+    var body: some View {
+        let records = model.records.filter { showUndone || $0.state != .undone }
+        let batches = Dictionary(grouping: records, by: \.batchID)
+            .sorted { ($0.value.map(\.time).min() ?? .distantPast) > ($1.value.map(\.time).min() ?? .distantPast) }
+        Group {
+            if batches.isEmpty {
+                ContentUnavailableView("No moves yet", systemImage: "clock.arrow.circlepath",
+                                       description: Text("Approved moves appear here, and every one can be undone."))
+            } else {
+                List {
+                    ForEach(batches, id: \.key) { batchID, moves in
+                        Section {
+                            ForEach(moves.sorted { $0.time > $1.time }, id: \.moveID) { move in
+                                HistoryRow(move: move)
+                            }
+                        } header: {
+                            BatchHeader(batchID: batchID, moves: moves)
+                        }
+                    }
+                }
+            }
+        }
+        .toolbar {
+            ToolbarItem {
+                Toggle("Show undone", isOn: $showUndone)
+            }
+            ToolbarItem {
+                Button("Move Log", systemImage: "doc.text") { model.reveal(model.journal.url) }
+                    .help("Show the move log (moves.jsonl) in Finder")
+            }
+        }
+    }
+}
+
+private struct BatchHeader: View {
+    @Environment(AppModel.self) private var model
+    let batchID: UUID
+    let moves: [MoveRecord]
+
+    var body: some View {
+        let moved = moves.filter { $0.state == .moved }.count
+        let when = moves.map(\.time).min() ?? Date()
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(when.short).font(.headline)
+                Text("Batch \(batchID.uuidString.prefix(8).lowercased()) · \(moves.count) file\(moves.count == 1 ? "" : "s") · \(moved) still in place")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button("Undo Batch", systemImage: "arrow.uturn.backward") { model.undoBatch(batchID) }
+                .disabled(moved == 0 || model.isApplying)
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+private struct HistoryRow: View {
+    @Environment(AppModel.self) private var model
+    let move: MoveRecord
+
+    var body: some View {
+        let current = URL(filePath: move.state == .undone ? (move.restoredPath ?? move.originalPath) : move.movedPath)
+        HStack(alignment: .top, spacing: 10) {
+            FileIcon(url: current, size: 24)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    StateBadge(state: move.state)
+                    Text(URL(filePath: move.originalPath).lastPathComponent).fontWeight(.medium)
+                }
+                Text("\(model.display(move.originalPath)) → \(model.display(move.movedPath))")
+                    .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                if let restored = move.restoredPath, move.state == .undone {
+                    Text("Put back at \(model.display(restored))").font(.caption).foregroundStyle(.secondary)
+                }
+                if let reason = move.reason { Text(reason).font(.caption).foregroundStyle(.tertiary) }
+                if !move.tagsAfter.isEmpty, move.state == .moved {
+                    TagsView(tags: move.tagsAfter.map(FinderTags.decode))
+                }
+            }
+            Spacer()
+            Text(move.time.formatted(date: .omitted, time: .shortened)).font(.caption).foregroundStyle(.secondary)
+            Button("Undo", systemImage: "arrow.uturn.backward") { model.undo([move]) }
+                .labelStyle(.iconOnly)
+                .disabled(move.state != .moved || model.isApplying)
+                .help("Put it back exactly as it was")
+            Button("Show in Finder", systemImage: "folder") { model.reveal(current) }
+                .labelStyle(.iconOnly)
+        }
+        .padding(.vertical, 3)
+    }
+}
+
+private struct StateBadge: View {
+    let state: MoveRecord.State
+
+    var body: some View {
+        let (text, color): (String, Color) = switch state {
+        case .moved: ("Moved", .green)
+        case .undone: ("Undone", .secondary)
+        case .failed: ("Failed", .red)
+        case .pending, .undoPending: ("Interrupted", .orange)
+        }
+        Text(text)
+            .font(.caption2.weight(.semibold))
+            .padding(.horizontal, 6).padding(.vertical, 1)
+            .background(color.opacity(0.15), in: Capsule())
+            .foregroundStyle(color)
+    }
+}
