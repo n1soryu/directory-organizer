@@ -6,6 +6,10 @@ public struct ProposedAction: Codable, Sendable, Identifiable {
 
     public var source: URL
     public var originalName: String
+    /// Size and modification date when planned. Checked again just before moving:
+    /// if either changed (still downloading, edited), the move is skipped.
+    public var sourceSize: Int64
+    public var sourceModified: Date?
     /// Folder relative to the home root.
     public var destinationFolder: String
     /// Final file name, after cleaning, renaming and clash handling.

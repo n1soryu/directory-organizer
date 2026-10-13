@@ -150,6 +150,8 @@ public struct Planner: Sendable {
         return ProposedAction(
             source: facts.url,
             originalName: facts.name,
+            sourceSize: facts.size,
+            sourceModified: facts.modified,
             destinationFolder: decision.destination,
             finalName: name,
             tags: decision.tags,

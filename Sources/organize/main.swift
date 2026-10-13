@@ -2,18 +2,26 @@ import Foundation
 import OrganizerCore
 
 let usage = """
-    organize: proposes where your downloads should go. Plan only: nothing is moved.
+    organize: sorts downloads into your folders. Nothing moves without your approval.
 
     Usage:
       organize plan <folder> [--home <folder>] [--json]
-          Show the proposed action for every item in <folder>.
-          --home   stand-in home folder for destinations (default: <folder>/../Home)
-          --json   print the plan as JSON
+          Show where every item in <folder> would go. Moves nothing.
+      organize apply <folder> [--home <folder>] [--yes]
+          Show the plan, ask for approval (all / one by one / cancel), then move and tag.
+          --yes   approve everything without asking
+      organize undo --last | --batch <id> | --all | <file name>  [--home <folder>]
+          Put files back exactly as they were (original folder, name and tags).
+      organize log [--home <folder>]
+          List moves and undos, newest first.
       organize facts <file>
           Show everything extracted from one file (as JSON).
 
+      --home   stand-in home folder (default: <folder>/../Home for plan/apply, TestData/Home otherwise)
+      The move log is kept next to the home folder: <home>/../moves.jsonl
+
     Example:
-      swift run make-testdata && swift run organize plan TestData/Downloads
+      swift run make-testdata && swift run organize apply TestData/Downloads
     """
 
 func fail(_ message: String) -> Never {
@@ -33,62 +41,146 @@ func refuseRealFolders(_ urls: URL...) {
     for url in urls {
         let p = url.resolvingSymlinksInPath().path
         if protected.contains(where: { p == $0 || ($0 != realHome && p.hasPrefix($0 + "/")) }) {
-            fail("\(p) is one of your real folders. Milestone 1 only runs on the sandbox (TestData).")
+            fail("\(p) is one of your real folders. For now this only runs on the sandbox (TestData).")
         }
+    }
+}
+
+func journal(for home: URL) -> MoveJournal {
+    MoveJournal(url: home.deletingLastPathComponent().appending(path: "moves.jsonl"))
+}
+
+func encoder() -> JSONEncoder {
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+    encoder.dateEncodingStrategy = .iso8601
+    return encoder
+}
+
+/// Parses `[--home <folder>] [flags...] [positional]`.
+struct Arguments {
+    var flags: Set<String> = []
+    var values: [String: String] = [:]
+    var positional: [String] = []
+
+    init(_ args: [String], valued: Set<String> = ["--home", "--batch"]) {
+        var args = args
+        while !args.isEmpty {
+            let arg = args.removeFirst()
+            if valued.contains(arg) {
+                guard !args.isEmpty else { fail("\(arg) needs a value") }
+                values[arg] = args.removeFirst()
+            } else if arg.hasPrefix("--") {
+                flags.insert(arg)
+            } else {
+                positional.append(arg)
+            }
+        }
+    }
+
+    /// The input folder and home folder for plan/apply.
+    func folders() -> (folder: URL, home: URL) {
+        guard positional.count == 1 else { fail("which folder?\n\n\(usage)") }
+        let folder = path(positional[0])
+        let home = values["--home"].map(path) ?? folder.deletingLastPathComponent().appending(path: "Home")
+        guard FileManager.default.fileExists(atPath: home.path) else {
+            fail("no home folder at \(home.path); pass --home <folder>")
+        }
+        refuseRealFolders(folder, home)
+        return (folder, home)
+    }
+
+    /// The home folder for undo/log.
+    func home() -> URL {
+        let home = path(values["--home"] ?? "TestData/Home")
+        guard FileManager.default.fileExists(atPath: home.path) else {
+            fail("no home folder at \(home.path); pass --home <folder>")
+        }
+        refuseRealFolders(home)
+        return home
+    }
+}
+
+func makePlan(_ folder: URL, _ home: URL) async -> Plan {
+    do {
+        return try await Planner(homeRoot: home).plan(folder: folder)
+    } catch {
+        fail("couldn't read \(folder.path): \(error.localizedDescription)")
     }
 }
 
 var args = Array(CommandLine.arguments.dropFirst())
 guard let command = args.first else { print(usage); exit(0) }
 args.removeFirst()
+let interactive = isatty(STDIN_FILENO) != 0
+let printer = PlanPrinter(useColor: isatty(STDOUT_FILENO) != 0)
 
 switch command {
 case "plan":
-    var json = false
-    var home: URL?
-    var folder: URL?
-    while !args.isEmpty {
-        let arg = args.removeFirst()
-        switch arg {
-        case "--json": json = true
-        case "--home":
-            guard !args.isEmpty else { fail("--home needs a folder") }
-            home = path(args.removeFirst())
-        default:
-            guard folder == nil, !arg.hasPrefix("-") else { fail("unexpected argument \(arg)\n\n\(usage)") }
-            folder = path(arg)
-        }
-    }
-    guard let folder else { fail("which folder?\n\n\(usage)") }
-    let homeRoot = home ?? folder.deletingLastPathComponent().appending(path: "Home")
-    guard FileManager.default.fileExists(atPath: homeRoot.path) else {
-        fail("no home folder at \(homeRoot.path); pass --home <folder>")
-    }
-    refuseRealFolders(folder, homeRoot)
-
-    let plan: Plan
-    do {
-        plan = try await Planner(homeRoot: homeRoot).plan(folder: folder)
-    } catch {
-        fail("couldn't read \(folder.path): \(error.localizedDescription)")
-    }
-    if json {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
-        encoder.dateEncodingStrategy = .iso8601
-        print(String(decoding: try encoder.encode(plan), as: UTF8.self))
+    let arguments = Arguments(args)
+    let (folder, home) = arguments.folders()
+    let plan = await makePlan(folder, home)
+    if arguments.flags.contains("--json") {
+        print(String(decoding: try encoder().encode(plan), as: UTF8.self))
     } else {
-        PlanPrinter(useColor: isatty(STDOUT_FILENO) != 0).print(plan)
+        printer.print(plan)
     }
+
+case "apply":
+    let arguments = Arguments(args)
+    let (folder, home) = arguments.folders()
+    let plan = await makePlan(folder, home)
+    printer.print(plan)
+    guard !plan.actions.isEmpty else { print("\nNothing to do."); exit(0) }
+
+    let approved: [ProposedAction]
+    if arguments.flags.contains("--yes") {
+        approved = plan.actions
+    } else {
+        guard interactive else { fail("can't ask for approval without a terminal; use --yes") }
+        approved = Approval(printer: printer).ask(plan.actions)
+    }
+    guard !approved.isEmpty else { print("Nothing approved; nothing moved."); exit(0) }
+
+    let results = Applier(homeRoot: home, journal: journal(for: home)).apply(approved)
+    printer.print(results, home: home)
+
+case "undo":
+    let arguments = Arguments(args)
+    let home = arguments.home()
+    let undoer = Undoer(journal: journal(for: home))
+    let candidates = try undoer.undoable()
+    let chosen: [MoveRecord]
+    if arguments.flags.contains("--all") {
+        chosen = candidates
+    } else if arguments.flags.contains("--last") {
+        guard let last = candidates.first else { fail("nothing to undo") }
+        chosen = candidates.filter { $0.batchID == last.batchID }
+    } else if let batch = arguments.values["--batch"] {
+        chosen = candidates.filter { $0.batchID.uuidString.lowercased().hasPrefix(batch.lowercased()) }
+    } else if let name = arguments.positional.first {
+        // Match the current name or the original name.
+        chosen = candidates.filter {
+            URL(filePath: $0.movedPath).lastPathComponent == name || URL(filePath: $0.originalPath).lastPathComponent == name
+        }
+    } else {
+        fail("undo what? --last, --batch <id>, --all or a file name\n\n\(usage)")
+    }
+    guard !chosen.isEmpty else { fail("no matching moves to undo (see `organize log`)") }
+    printer.print(undoer.undo(chosen), home: home)
+
+case "log":
+    let arguments = Arguments(args)
+    let home = arguments.home()
+    let log = journal(for: home)
+    try log.recover()
+    printer.printLog(try log.records(), home: home)
 
 case "facts":
     guard let file = args.first.map(path) else { fail("which file?") }
     refuseRealFolders(file.deletingLastPathComponent())
     let facts = await FactExtractor().facts(for: file)
-    let encoder = JSONEncoder()
-    encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
-    encoder.dateEncodingStrategy = .iso8601
-    print(String(decoding: try encoder.encode(facts), as: UTF8.self))
+    print(String(decoding: try encoder().encode(facts), as: UTF8.self))
 
 case "-h", "--help", "help":
     print(usage)

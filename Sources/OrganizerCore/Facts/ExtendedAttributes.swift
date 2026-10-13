@@ -22,6 +22,29 @@ public enum ExtendedAttributes {
         guard result == 0 else { throw CocoaError(.fileWriteUnknown, userInfo: [NSFilePathErrorKey: url.path]) }
     }
 
+    /// Removes an attribute. Removing one that isn't there is not an error.
+    public static func remove(_ name: String, at url: URL) throws {
+        let result = url.withUnsafeFileSystemRepresentation { path -> Int32 in
+            guard let path else { return -1 }
+            return removexattr(path, name, XATTR_NOFOLLOW)
+        }
+        guard result == 0 || errno == ENOATTR else {
+            throw CocoaError(.fileWriteUnknown, userInfo: [NSFilePathErrorKey: url.path])
+        }
+    }
+
+    /// All attribute names on a file, e.g. ["com.apple.metadata:kMDItemWhereFroms"].
+    public static func names(at url: URL) -> [String] {
+        url.withUnsafeFileSystemRepresentation { path -> [String] in
+            guard let path else { return [] }
+            let size = listxattr(path, nil, 0, XATTR_NOFOLLOW)
+            guard size > 0 else { return [] }
+            var buffer = [CChar](repeating: 0, count: size)
+            guard listxattr(path, &buffer, size, XATTR_NOFOLLOW) == size else { return [] }
+            return buffer.split(separator: 0).map { String(decoding: $0.map { UInt8(bitPattern: $0) }, as: UTF8.self) }
+        }
+    }
+
     /// Reads an attribute stored as a property list (the format Spotlight's `com.apple.metadata:` ones use).
     public static func propertyList(_ name: String, at url: URL) -> Any? {
         guard let data = data(name, at: url) else { return nil }
