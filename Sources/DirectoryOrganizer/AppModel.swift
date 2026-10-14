@@ -158,10 +158,14 @@ final class AppModel {
     var nextReminder: Date {
         ReviewReminder.nextDue(lastSent: settings.lastReviewReminder, interval: settings.reviewReminderHours * 3600)
     }
-    /// True while either folder is one of your real folders: everything stops until real use is unlocked.
+    /// True while either folder is one of your real folders.
     var isUsingRealFolders: Bool {
         FolderAccess.isRealUserFolder(watchedURL) || FolderAccess.isRealUserFolder(homeURL)
     }
+    var isRealUseOn: Bool { settings.realUseSince != nil }
+    /// Real folders chosen without switching to real use (e.g. by editing the settings file):
+    /// everything stops.
+    var isLocked: Bool { isUsingRealFolders && !isRealUseOn }
 
     // MARK: Private
 
@@ -176,6 +180,7 @@ final class AppModel {
     private var notifiedAlertIDs = Set<String>()
     private var reminderTask: Task<Void, Never>?
     private var started = false
+    private var reportedDamagedLines = 0
 
     /// Debug runs (DO_SNAPSHOT, DO_E2E) use a throwaway settings file, never yours.
     static let settingsURL: URL = {
@@ -217,8 +222,8 @@ final class AppModel {
     }
 
     private func scan() async {
-        guard !isUsingRealFolders else {
-            show(.error, "Your real folders are locked for now; choose folders inside TestData in Settings.")
+        guard !isLocked else {
+            show(.error, "Your real folders are locked; switch to them in Settings, or choose folders inside TestData.")
             return
         }
         guard FileManager.default.fileExists(atPath: watchedURL.path) else {
@@ -230,7 +235,8 @@ final class AppModel {
         defer { isScanning = false }
 
         // Quick scan: rules only, no text recognition, no model. Heavy work waits for Organize Now.
-        let planner = Planner(homeRoot: homeURL, mode: .quick)
+        var planner = Planner(homeRoot: homeURL, mode: .quick)
+        planner.onlyAddedAfter = settings.realUseSince
         let plan: Plan
         do {
             plan = try await planner.plan(folder: watchedURL)
@@ -279,7 +285,7 @@ final class AppModel {
     /// The full run: text recognition for images and scans, the model for leftovers and
     /// unclear names, all asked fresh.
     func organizeNow() {
-        guard organizing == nil, !isUsingRealFolders else { return }
+        guard organizing == nil, !isLocked else { return }
         organizing = FullRun()
         organizeTask = Task { await runFullOrganize() }
     }
@@ -293,6 +299,7 @@ final class AppModel {
         let started = Date()
         refreshModelStatus()
         var planner = Planner(homeRoot: homeURL, mode: .full)
+        planner.onlyAddedAfter = settings.realUseSince
         if settings.useModel, modelUnavailableReason == nil {
             planner.classifier = AppleClassifier()
         }
@@ -387,7 +394,7 @@ final class AppModel {
     }
 
     private func apply(_ actions: [ProposedAction], automatic: Bool) async {
-        guard !isUsingRealFolders else { return }
+        guard !isLocked else { return }
         isApplying = true
         let applier = Applier(homeRoot: homeURL, journal: journal)
         let results = await Task.detached { applier.apply(actions) }.value
@@ -419,7 +426,7 @@ final class AppModel {
 
     func undo(_ moves: [MoveRecord]) {
         let undoable = moves.filter { $0.state == .moved }
-        guard !undoable.isEmpty, !isUsingRealFolders else { return }
+        guard !undoable.isEmpty, !isLocked else { return }
         let undoer = Undoer(journal: journal)
         isApplying = true
         Task {
@@ -451,8 +458,18 @@ final class AppModel {
     // MARK: - Journal, review folder, model
 
     func reloadJournal() {
-        _ = try? journal.recover()
-        records = (try? journal.records()) ?? []
+        do {
+            try journal.recover()
+            records = try journal.records()
+            let damaged = try journal.damagedLineCount()
+            if damaged > reportedDamagedLines {
+                show(.warning, "\(damaged) line\(damaged == 1 ? "" : "s") of the move log couldn't be read and were skipped; the rest of the history is fine.")
+            }
+            reportedDamagedLines = damaged
+        } catch {
+            records = []
+            show(.error, "Couldn't read the move log (\(display(journal.url))): \(error.localizedDescription)")
+        }
     }
 
     func refreshReviewFolder() {
@@ -482,7 +499,7 @@ final class AppModel {
         watcher?.stop()
         watcher = nil
         isWatching = false
-        guard settings.watching, !isUsingRealFolders else { return }
+        guard settings.watching, !isLocked else { return }
         let watcher = FolderWatcher(url: watchedURL) {
             Task { @MainActor in AppModel.shared.requestScan() }
         }
@@ -491,10 +508,10 @@ final class AppModel {
         if !isWatching { show(.error, "Can't watch \(display(watchedURL)).") }
     }
 
-    /// Points the app at different folders (must not be your real folders, for now).
+    /// Points the app at different folders. Your real folders only after switching to real use.
     func setFolders(watched: URL? = nil, home: URL? = nil) {
-        for url in [watched, home].compactMap(\.self) where FolderAccess.isRealUserFolder(url) {
-            show(.error, "\(url.path) is one of your real folders. They stay locked until you decide to switch.")
+        for url in [watched, home].compactMap(\.self) where FolderAccess.isRealUserFolder(url) && !isRealUseOn {
+            show(.error, "\(url.path) is one of your real folders. Use \"Switch to My Real Folders\" first.")
             return
         }
         if let watched { settings.watchedFolder = watched.path }
@@ -505,6 +522,32 @@ final class AppModel {
         refreshReviewFolder()
         updateWatcher()
         requestScan()
+    }
+
+    /// Starts real use: watches ~/Downloads and files into your home folder, but only files
+    /// downloaded from now on. Auto-filing is turned off, so the first real moves all ask you.
+    func switchToRealFolders() {
+        guard !isRealUseOn else { return }
+        organizeTask?.cancel()
+        let real = AppSettings.real()
+        settings.realUseSince = Date()
+        settings.autoApply.enabled = []
+        settings.rejected = []
+        deepResults = [:]
+        log(.info, "Switched to your real folders: only files downloaded from now on are organized")
+        setFolders(watched: URL(filePath: real.watchedFolder), home: URL(filePath: real.homeRoot))
+    }
+
+    /// Back to the test folders. Moves already made stay in your folders (undo them first in
+    /// History if you want them back); their log stays in Application Support.
+    func switchToSandbox() {
+        organizeTask?.cancel()
+        let sandbox = AppSettings()
+        settings.realUseSince = nil
+        settings.rejected = []
+        deepResults = [:]
+        log(.info, "Switched back to the sandbox")
+        setFolders(watched: URL(filePath: sandbox.watchedFolder), home: URL(filePath: sandbox.homeRoot))
     }
 
     // MARK: - Reminders and notifications

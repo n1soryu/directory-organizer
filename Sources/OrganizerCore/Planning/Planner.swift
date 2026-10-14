@@ -10,6 +10,9 @@ public struct Planner: Sendable {
     public var rules = RulesEngine.standard
     public var classifier: any FileClassifier = StubClassifier()
     public var mode: Mode = .full
+    /// If set, items that arrived in the folder before this date are left alone entirely
+    /// (not read, not listed): only new downloads are organized.
+    public var onlyAddedAfter: Date?
 
     public enum Mode: Sendable {
         /// Rules only: no text recognition, no model. Seconds, not minutes. Files that need
@@ -46,8 +49,11 @@ public struct Planner: Sendable {
     /// (throws `CancellationError`); planning only reads, so stopping half-way is harmless.
     public func plan(folder: URL, progress: (@Sendable (Progress) -> Void)? = nil) async throws -> Plan {
         let fm = FileManager.default
-        let urls = try fm.contentsOfDirectory(
-            at: folder, includingPropertiesForKeys: [.addedToDirectoryDateKey], options: [.skipsHiddenFiles])
+        var urls = try fm.contentsOfDirectory(
+            at: folder, includingPropertiesForKeys: [.addedToDirectoryDateKey, .creationDateKey], options: [.skipsHiddenFiles])
+        if let cutoff = onlyAddedAfter {
+            urls = urls.filter { Self.arrival(of: $0).map { $0 >= cutoff } ?? false }
+        }
 
         var skipped: [SkippedItem] = []
         var facts: [FileFacts] = []
@@ -104,6 +110,13 @@ public struct Planner: Sendable {
 
         return Plan(createdAt: Date(), inputFolder: folder, homeRoot: homeRoot, actions: actions,
                     skipped: skipped, waiting: waiting)
+    }
+
+    /// When an item arrived in its folder: the date it was added, else when it was created.
+    /// nil (unknown) counts as old, so nothing is touched by mistake.
+    static func arrival(of url: URL) -> Date? {
+        let values = try? url.resourceValues(forKeys: [.addedToDirectoryDateKey, .creationDateKey])
+        return values?.addedToDirectoryDate ?? values?.creationDate
     }
 
     /// Quick scans: why a file has to wait for a full run, or nil if rules can decide it now.

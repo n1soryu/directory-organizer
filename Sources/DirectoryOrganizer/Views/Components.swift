@@ -276,7 +276,7 @@ struct OrganizeNowControl: View {
                 .frame(maxWidth: compact ? nil : .infinity)
             }
             .buttonStyle(GradientButtonStyle(large: !compact))
-            .disabled(model.isApplying || model.isUsingRealFolders)
+            .disabled(model.isApplying || model.isLocked)
             .help("Read everything in full (text recognition) and ask the model about files no rule can place")
         }
     }

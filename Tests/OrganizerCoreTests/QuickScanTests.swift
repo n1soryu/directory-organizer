@@ -22,6 +22,19 @@ import TestDataKit
         }
     }
 
+    @Test func onlyFilesDownloadedAfterTheSwitchAreConsidered() async throws {
+        _ = try TestDataBuilder.build(at: root)
+        defer { try? FileManager.default.removeItem(at: root) }
+        var planner = Planner(homeRoot: home, mode: .quick)
+        planner.onlyAddedAfter = Date().addingTimeInterval(1)
+        try await Task.sleep(for: .seconds(1.5))
+        try Data("new download".utf8).write(to: downloads.appending(path: "Fresh ECO201 notes.txt"))
+
+        let plan = try await planner.plan(folder: downloads)
+        let seen = plan.actions.map(\.originalName) + plan.waiting.map(\.name) + plan.skipped.map(\.name)
+        #expect(seen == ["Fresh ECO201 notes.txt"])
+    }
+
     @Test func quickScanUsesRulesOnlyAndLeavesTheRestWaiting() async throws {
         _ = try TestDataBuilder.build(at: root)
         defer { try? FileManager.default.removeItem(at: root) }

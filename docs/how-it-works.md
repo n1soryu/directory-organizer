@@ -135,8 +135,10 @@ Swift then checks every answer:
 - **No escaping the home folder:** symlinks are resolved, so a linked folder can't redirect a file
   elsewhere.
 - **Write-ahead log:** each move is logged as "pending" (fsync'd) before the file is touched and
-  "done" afterwards, in append-only JSON Lines (`TestData/moves.jsonl` for now). An interrupted
-  run is settled on the next start by checking where the file actually is.
+  "done" afterwards, in append-only JSON Lines (`TestData/moves.jsonl` in the sandbox,
+  `~/Library/Application Support/DirectoryOrganizer/moves.jsonl` for your real folders). An interrupted
+  run is settled on the next start by checking where the file actually is. A line cut short by a
+  crash is skipped (and reported), so it never hides the rest of the history.
 - **Tags:** `com.apple.metadata:_kMDItemUserTags`, a binary plist of `"Name\nColor"` strings
   (NSU 4, FSAE 2, Personal 3, Secure 6). Tags already on the file are kept.
 - **Origin note:** each moved file gets a small `io.github.n1soryu.directory-organizer.origin`
@@ -196,7 +198,7 @@ Open Dashboard.
 | History | every batch and move from the log, with undo per move or per batch |
 | Review Folder | what's waiting in `To Delete (Review)` and why, put-back, reminder schedule |
 | Folders | the folders files can go to, what each is for, its tags, item counts, folders the app created |
-| Settings | folders (sandbox only), watching, model on/off and status, auto-apply per category, notifications and reminder interval, access to your real folders |
+| Settings | sandbox or real folders, watching, model on/off and status, auto-apply per category, notifications and reminder interval, access to your real folders |
 
 **How it runs:**
 - **Watching:** FSEvents on the watched folder. A burst of changes (a download being written)
@@ -213,8 +215,12 @@ Open Dashboard.
   ("Check Access" triggers the macOS prompts) and links to Full Disk Access, for when real use is
   switched on.
 - Settings are saved in `~/Library/Application Support/DirectoryOrganizer/settings.json`
-  (debug runs use a throwaway copy); the move log is shared with the `organize` command
+  (debug runs use a throwaway copy); the sandbox move log is shared with the `organize` command
   (`TestData/moves.jsonl`).
+- **Real folders:** "Switch to My Real Folders" (with a confirmation) watches `~/Downloads` and files
+  into your home folder. Only items that arrived in Downloads after the switch are considered
+  (`Planner.onlyAddedAfter`); auto-filing and earlier rejections are reset. The `organize` command
+  stays sandbox-only.
 
 ## Layout
 

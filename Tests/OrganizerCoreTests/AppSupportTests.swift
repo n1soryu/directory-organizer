@@ -53,6 +53,28 @@ import Testing
         #expect(AppSettings.load(from: file.appending(path: "missing")) == AppSettings())
     }
 
+    @Test func settingsFromOlderVersionsStillLoad() throws {
+        let file = FileManager.default.temporaryDirectory.appending(path: "settings-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: file) }
+        // 0.5.0 settings: no realUseSince.
+        try Data(#"""
+            {"autoApply":{"enabled":["films"]},"homeRoot":"/tmp/home","notifyNewFiles":true,"rejected":[],
+             "reviewReminderHours":8,"useModel":true,"watchedFolder":"/tmp/in","watching":true}
+            """#.utf8).write(to: file)
+        let settings = AppSettings.load(from: file)
+        #expect(settings.homeRoot == "/tmp/home")
+        #expect(settings.autoApply.enabled == ["films"])
+        #expect(settings.realUseSince == nil)
+    }
+
+    @Test func realHomeKeepsItsMoveLogInApplicationSupport() {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        #expect(MoveJournal.url(forHome: home).path
+                == home.appending(path: "Library/Application Support/DirectoryOrganizer/moves.jsonl").path)
+        let sandbox = AppSettings.sandboxRoot.appending(path: "Home")
+        #expect(MoveJournal.url(forHome: sandbox).path == AppSettings.sandboxRoot.appending(path: "moves.jsonl").path)
+    }
+
     @Test func realFoldersAreRecognized() {
         let home = FileManager.default.homeDirectoryForCurrentUser
         #expect(FolderAccess.isRealUserFolder(home))

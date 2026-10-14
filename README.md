@@ -32,8 +32,10 @@ It isn't notarized, so the first time: right-click the app → **Open** → **Op
 
 Requires macOS 27 on Apple silicon; Apple Intelligence on for the model (System Settings → Siri).
 
-> **Preview:** the app currently works only on a test sandbox (`~/Developer/directory-organizer/TestData`,
-> created with `swift run make-testdata`); your real folders are locked until real use is switched on.
+It starts on a test sandbox (`~/Developer/directory-organizer/TestData`, created with
+`swift run make-testdata`). To use it on your own files: **Settings → Switch to My Real Folders**.
+From then on it watches `~/Downloads`, but only files downloaded *after* the switch are touched;
+auto-filing is off, so every move waits for your approval.
 
 ## Build from source
 

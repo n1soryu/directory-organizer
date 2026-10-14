@@ -66,24 +66,54 @@ public struct MoveJournal: Sendable {
         self.url = url
     }
 
+    /// Where the move log for `home` lives. For the sandbox it sits next to the stand-in
+    /// home (`TestData/moves.jsonl`); for your real home it's in Application Support, since
+    /// the folder above your home (`/Users`) isn't yours to write in.
+    public static func url(forHome home: URL) -> URL {
+        if FolderAccess.isRealUserFolder(home) {
+            return FileManager.default.homeDirectoryForCurrentUser
+                .appending(path: "Library/Application Support/DirectoryOrganizer/moves.jsonl")
+        }
+        return home.standardizedFileURL.deletingLastPathComponent().appending(path: "moves.jsonl")
+    }
+
     /// Appends one entry and flushes it to disk before returning.
     public func append(_ entry: JournalEntry) throws {
         var line = try Self.encoder.encode(entry)
         line.append(0x0A)
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        let fd = open(url.path, O_WRONLY | O_APPEND | O_CREAT, 0o644)
+        let fd = open(url.path, O_RDWR | O_APPEND | O_CREAT, 0o644)
         guard fd >= 0 else { throw MoveError.system("opening the move log", errno) }
         defer { close(fd) }
+        // A line cut short by a crash has no newline; start on a fresh line so this entry
+        // isn't glued onto the broken one (and lost with it).
+        var info = stat()
+        var last: UInt8 = 0x0A
+        if fstat(fd, &info) == 0, info.st_size > 0, pread(fd, &last, 1, info.st_size - 1) == 1, last != 0x0A {
+            line.insert(0x0A, at: 0)
+        }
         let written = line.withUnsafeBytes { write(fd, $0.baseAddress, line.count) }
         guard written == line.count else { throw MoveError.system("writing the move log", errno) }
         // fsync: the entry is on disk before we touch the file it describes.
         fsync(fd)
     }
 
+    /// Every readable entry, oldest first. A line that can't be read (cut short by a power
+    /// loss mid-write, say) is skipped, so one bad line never hides the rest of the history.
     public func entries() throws -> [JournalEntry] {
-        guard FileManager.default.fileExists(atPath: url.path) else { return [] }
-        let data = try Data(contentsOf: url)
-        return try data.split(separator: 0x0A).map { try Self.decoder.decode(JournalEntry.self, from: Data($0)) }
+        try read().entries
+    }
+
+    /// How many lines of the log couldn't be read and were skipped.
+    public func damagedLineCount() throws -> Int {
+        try read().damaged
+    }
+
+    private func read() throws -> (entries: [JournalEntry], damaged: Int) {
+        guard FileManager.default.fileExists(atPath: url.path) else { return ([], 0) }
+        let lines = try Data(contentsOf: url).split(separator: 0x0A)
+        let entries = lines.compactMap { try? Self.decoder.decode(JournalEntry.self, from: Data($0)) }
+        return (entries, lines.count - entries.count)
     }
 
     /// Every move with its current state, oldest first.

@@ -6,16 +6,29 @@ struct SettingsView: View {
     @Environment(AppModel.self) private var model
     /// Real-folder access is only checked when you ask: checking is what makes macOS ask you.
     @ViewState private var access: [String: FolderAccess.Status] = [:]
+    @ViewState private var confirmReal = false
+    @ViewState private var confirmSandbox = false
 
     var body: some View {
         @Bindable var model = model
         Form {
             Section {
-                LabeledContent("Mode") {
-                    Label("Sandbox (TestData)", systemImage: "testtube.2").foregroundStyle(.orange)
+                if let since = model.settings.realUseSince {
+                    LabeledContent("Mode") {
+                        Label("Your real folders", systemImage: "house").foregroundStyle(.green)
+                    }
+                    Text("Only files downloaded since \(since.formatted(date: .abbreviated, time: .shortened)) are organized; what was already in Downloads stays put. Nothing moves until you approve it, and every move can be undone in History.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Button("Switch Back to the Sandbox…") { confirmSandbox = true }
+                } else {
+                    LabeledContent("Mode") {
+                        Label("Sandbox (TestData)", systemImage: "testtube.2").foregroundStyle(.orange)
+                    }
+                    Text("The app works inside the test folders. Your real Downloads, Documents, Desktop, Pictures, Movies and Music are locked until you switch to them.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Button("Switch to My Real Folders…") { confirmReal = true }
+                        .buttonStyle(.borderedProminent)
                 }
-                Text("The app only works inside the test folders for now. Your real Downloads, Documents, Desktop, Pictures, Movies and Music are locked, and the app refuses them even if chosen below.")
-                    .font(.caption).foregroundStyle(.secondary)
                 folderRow("Watched folder", path: model.settings.watchedFolder) { model.setFolders(watched: $0) }
                 folderRow("Home folder", path: model.settings.homeRoot) { model.setFolders(home: $0) }
                 LabeledContent("Move log") {
@@ -24,12 +37,24 @@ struct SettingsView: View {
                 LabeledContent("Settings file") {
                     Button(model.display(AppSettings.defaultURL.path)) { model.reveal(AppSettings.defaultURL) }.buttonStyle(.link)
                 }
-                Button("Reset to the Sandbox Folders") {
-                    let defaults = AppSettings()
-                    model.setFolders(watched: URL(filePath: defaults.watchedFolder), home: URL(filePath: defaults.homeRoot))
+                if !model.isRealUseOn {
+                    Button("Reset to the Sandbox Folders") {
+                        let defaults = AppSettings()
+                        model.setFolders(watched: URL(filePath: defaults.watchedFolder), home: URL(filePath: defaults.homeRoot))
+                    }
                 }
             } header: {
                 Text("Folders")
+            }
+            .confirmationDialog("Switch to your real folders?", isPresented: $confirmReal) {
+                Button("Switch to My Real Folders") { model.switchToRealFolders() }
+            } message: {
+                Text("The app will watch ~/Downloads and file into Documents, Pictures, Movies, Music, Developer and \"Desktop/To Delete (Review)\" in your home folder.\n\nOnly files downloaded from now on are touched. Nothing moves until you approve it, auto-filing is turned off, and every move can be undone. macOS will ask for permission to read your Downloads.")
+            }
+            .confirmationDialog("Switch back to the sandbox?", isPresented: $confirmSandbox) {
+                Button("Switch to the Sandbox") { model.switchToSandbox() }
+            } message: {
+                Text("Files already moved stay where they are. To put them back, undo them in History first.")
             }
 
             Section("Watching") {
@@ -113,9 +138,9 @@ struct SettingsView: View {
                     }
                 }
             } header: {
-                Text("Access to your real folders (for later)")
+                Text("Access to your real folders")
             } footer: {
-                Text("Not used yet. When real use is switched on, the app needs to read Downloads and write to your other folders. macOS asks once per protected folder (Downloads, Documents, Desktop) the first time it's read; \"Check Access\" triggers those questions now. Alternatively, grant Full Disk Access in Privacy & Security. You can withdraw either there at any time.")
+                Text("With real folders on, the app needs to read Downloads and write to your other folders. macOS asks once per protected folder (Downloads, Documents, Desktop) the first time it's read; \"Check Access\" triggers those questions now. Alternatively, grant Full Disk Access in Privacy & Security. You can withdraw either there at any time.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }

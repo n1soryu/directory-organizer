@@ -126,6 +126,10 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var notifyNewFiles = true
     /// Files you rejected; they stay out of the plan until they change.
     public var rejected: [FileIdentity] = []
+    /// When you switched to your real folders, or nil while using the sandbox. Only files
+    /// downloaded after this are organized; what was already in Downloads stays put.
+    /// (Optional, so settings files from older versions still load.)
+    public var realUseSince: Date?
 
     /// The sandbox inside the project: ~/Developer/directory-organizer/TestData.
     public static var sandboxRoot: URL {
@@ -154,9 +158,15 @@ public struct AppSettings: Codable, Equatable, Sendable {
         try Self.encoder.encode(self).write(to: url, options: .atomic)
     }
 
-    /// The move log sits next to the home folder, shared with the `organize` command.
+    /// Your real folders, the way switching to real use sets them up.
+    public static func real() -> (watchedFolder: String, homeRoot: String) {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        return (home.appending(path: "Downloads").path, home.path)
+    }
+
+    /// The move log for the home folder, shared with the `organize` command.
     public var journalURL: URL {
-        URL(filePath: homeRoot).deletingLastPathComponent().appending(path: "moves.jsonl")
+        MoveJournal.url(forHome: URL(filePath: homeRoot))
     }
 
     private static var encoder: JSONEncoder {

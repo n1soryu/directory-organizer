@@ -24,6 +24,7 @@ let usage = """
 
       --home   stand-in home folder (default: <folder>/../Home for plan/apply, TestData/Home otherwise)
       The move log is kept next to the home folder: <home>/../moves.jsonl
+      This tool only works on the sandbox; the app handles your real folders.
 
     Example:
       swift run make-testdata && swift run organize apply TestData/Downloads
@@ -52,7 +53,7 @@ func refuseRealFolders(_ urls: URL...) {
 }
 
 func journal(for home: URL) -> MoveJournal {
-    MoveJournal(url: home.deletingLastPathComponent().appending(path: "moves.jsonl"))
+    MoveJournal(url: MoveJournal.url(forHome: home))
 }
 
 func encoder() -> JSONEncoder {

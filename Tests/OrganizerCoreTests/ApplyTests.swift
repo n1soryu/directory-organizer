@@ -167,6 +167,26 @@ import TestDataKit
         #expect(undoer.undo(try undoer.undoable()).first?.restoredTo == action.source)
     }
 
+    @Test func aDamagedLogLineDoesNotHideTheRest() async throws {
+        let plan = try await setUp()
+        defer { cleanUp() }
+        let action = try #require(plan.actions.first { $0.originalName == "notes.txt" })
+        _ = Applier(homeRoot: home, journal: journal).apply([action])
+        // A power loss mid-write: half a line, no newline at the end.
+        let handle = try FileHandle(forWritingTo: journal.url)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data(#"{"event":"movePend"#.utf8))
+        try handle.close()
+
+        #expect(try journal.damagedLineCount() == 1)
+        #expect(try journal.records().map(\.state) == [.moved])
+        // The next entry starts on a fresh line instead of being glued onto the broken one.
+        let undoer = Undoer(journal: journal)
+        #expect(undoer.undo(try undoer.undoable()).first?.restoredTo == action.source)
+        #expect(try journal.records().map(\.state) == [.undone])
+        #expect(try journal.damagedLineCount() == 1)
+    }
+
     /// Every file and folder under the sandbox with its content hash and all extended attributes.
     private func snapshot() throws -> [String: String] {
         var result: [String: String] = [:]
