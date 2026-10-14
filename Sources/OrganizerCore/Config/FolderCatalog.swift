@@ -16,7 +16,7 @@ public enum FolderCatalog {
 
     public static func core(_ config: OrganizerConfig) -> [FolderOption] {
         [
-            FolderOption(path: config.essays, purpose: "the user's own essays and personal writing", tags: [.personal]),
+            FolderOption(path: config.essays, purpose: "personal essays and own writing", tags: [.personal]),
             FolderOption(path: config.fsae, purpose: "NSU Formula SAE racing team files", tags: [.fsae]),
             FolderOption(path: config.secure, purpose: "identity documents, passwords, keys, sensitive personal records", tags: [.secure]),
             FolderOption(path: config.university, purpose: "North South University (NSU) documents not tied to one course", tags: [.nsu]),

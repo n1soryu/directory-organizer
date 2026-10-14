@@ -564,6 +564,12 @@ final class AppModel {
         return path.hasPrefix(home) ? "~" + path.dropFirst(home.count) : path
     }
 
+    /// A path relative to the home folder ("Documents/FSAE/x.pdf"), or the path itself if outside it.
+    func homeRelative(_ path: String) -> String {
+        let home = homeURL.path + "/"
+        return path.hasPrefix(home) ? String(path.dropFirst(home.count)) : path
+    }
+
     func reveal(_ url: URL) {
         if FileManager.default.fileExists(atPath: url.path) {
             NSWorkspace.shared.activateFileViewerSelecting([url])

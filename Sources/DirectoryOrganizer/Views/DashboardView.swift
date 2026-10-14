@@ -25,7 +25,18 @@ struct DashboardView: View {
                     row(.settings)
                 }
             }
-            .navigationSplitViewColumnWidth(min: 190, ideal: 210)
+            .safeAreaInset(edge: .top) {
+                HStack(spacing: 10) {
+                    AppMark(size: 30)
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text("Directory").font(.headline)
+                        Text("Organizer").font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
+                .padding(.horizontal, 14).padding(.vertical, 8)
+            }
+            .navigationSplitViewColumnWidth(min: 200, ideal: 220)
             .safeAreaInset(edge: .bottom) { StatusFooter().padding(10) }
         } detail: {
             VStack(spacing: 0) {
@@ -38,7 +49,7 @@ struct DashboardView: View {
             .toolbar {
                 ToolbarItem(placement: .navigation) {
                     OrganizeNowControl(compact: true)
-                        .frame(minWidth: model.organizing == nil ? nil : 260)
+
                 }
             }
         }
@@ -148,86 +159,101 @@ struct MenuBarView: View {
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("Directory Organizer").font(.headline)
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 10) {
+                AppMark(size: 30)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("Directory Organizer").font(.headline)
+                    Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
                 Spacer()
                 StatusPill()
             }
 
             OrganizeNowControl()
-            if let last = model.lastFullRun, model.organizing == nil {
-                Text("Last run \(last.date.relative): \(last.text)")
-                    .font(.caption).foregroundStyle(.secondary).lineLimit(2)
-            }
 
             HStack(spacing: 8) {
-                MiniStat(value: model.pending.count, label: "Pending", tint: .accentColor) { show(.pending) }
-                MiniStat(value: model.waiting.count, label: "Waiting", tint: .purple) { show(.pending) }
-                MiniStat(value: model.alertActions.count, label: "Alerts", tint: .red) { show(.alerts) }
-                MiniStat(value: model.reviewItems.count, label: "In review", tint: .orange) { show(.review) }
-            }
-
-            if !model.alertActions.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    ForEach(model.alertActions.prefix(3)) { action in
-                        HStack(spacing: 6) {
-                            AlertIcons(alerts: action.alerts)
-                            Text(action.originalName).lineLimit(1).truncationMode(.middle)
-                        }
-                        .font(.callout)
-                    }
-                }
+                MiniStat(value: model.pending.count, label: "Ready", symbol: "tray.full.fill", tint: .blue) { show(.pending) }
+                MiniStat(value: model.waiting.count, label: "Waiting", symbol: "wand.and.sparkles", tint: .purple) { show(.pending) }
+                MiniStat(value: model.alertActions.count, label: "Alerts", symbol: "exclamationmark.triangle.fill", tint: .red) { show(.alerts) }
+                MiniStat(value: model.reviewItems.count, label: "Review", symbol: "archivebox.fill", tint: .orange) { show(.review) }
             }
 
             if model.pending.isEmpty {
                 Text(model.isScanning ? "Scanning \(model.display(model.watchedURL))…"
-                     : model.waiting.isEmpty ? "Nothing waiting. New downloads appear here."
-                     : "Nothing ready yet: press Organize Now for the files that need a full read.")
+                     : model.waiting.isEmpty ? "All sorted. New downloads appear here."
+                     : "Nothing ready yet: Organize Now reads the waiting files.")
                     .foregroundStyle(.secondary)
                     .font(.callout)
+                    .frame(maxWidth: .infinity, minHeight: 40)
             } else {
-                VStack(spacing: 0) {
-                    ForEach(model.pending.prefix(6)) { action in
-                        MenuBarRow(action: action)
-                        Divider()
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text("Ready to file").font(.subheadline.weight(.semibold))
+                        Spacer()
+                        Button("Approve all \(model.pending.count)") { model.approveAll() }
+                            .buttonStyle(SoftButtonStyle())
+                            .disabled(model.isApplying)
+                    }
+                    VStack(spacing: 2) {
+                        ForEach(model.pending.sorted { !$0.alerts.isEmpty && $1.alerts.isEmpty }.prefix(5)) { action in
+                            MenuBarRow(action: action)
+                        }
+                    }
+                    if model.pending.count > 5 {
+                        Button("and \(model.pending.count - 5) more in the dashboard") { show(.pending) }
+                            .buttonStyle(.link).font(.caption)
                     }
                 }
-                if model.pending.count > 6 {
-                    Text("and \(model.pending.count - 6) more…").font(.caption).foregroundStyle(.secondary)
-                }
             }
 
             HStack {
-                Button("Approve All (\(model.pending.count))") { model.approveAll() }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(model.pending.isEmpty || model.isApplying)
-                Button("Scan", systemImage: "arrow.clockwise") { model.requestScan() }
-                    .disabled(model.isScanning)
+                Button { show(model.page) } label: { Label("Dashboard", systemImage: "macwindow") }
+                    .buttonStyle(SoftButtonStyle(tint: .primary))
                 Spacer()
-                Button(model.isWatching ? "Pause" : "Resume", systemImage: model.isWatching ? "pause" : "play") {
-                    model.setWatching(!model.isWatching)
+                Menu {
+                    Button("Quick Scan") { model.requestScan() }
+                    Button(model.isWatching ? "Pause Watching" : "Resume Watching") { model.setWatching(!model.isWatching) }
+                    Divider()
+                    Button("Settings…") { show(.settings) }
+                    Button("Quit Directory Organizer") { NSApp.terminate(nil) }
+                } label: {
+                    Image(systemName: "ellipsis.circle").font(.title3)
                 }
-                .labelStyle(.iconOnly)
-                .help(model.isWatching ? "Pause watching" : "Resume watching")
-            }
-
-            Divider()
-            HStack {
-                Button("Open Dashboard") { show(model.page) }
-                Spacer()
-                Button("Quit") { NSApp.terminate(nil) }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
             }
         }
-        .padding(14)
-        .frame(width: 400)
+        .padding(16)
+        .frame(width: 380)
         .onAppear { model.openDashboardAction = { [openWindow] in openWindow(id: "dashboard") } }
+    }
+
+    private var subtitle: String {
+        if let last = model.lastFullRun, model.organizing == nil {
+            return "Last Organize Now \(last.date.relative)"
+        }
+        return model.lastScan.map { "Checked \($0.relative)" } ?? "Starting…"
     }
 
     private func show(_ page: AppModel.Page) {
         model.page = page
         openWindow(id: "dashboard")
         NSApp.activate()
+    }
+}
+
+/// The app's mark: the icon's tray-and-sparkle on the gradient.
+struct AppMark: View {
+    var size: CGFloat = 28
+
+    var body: some View {
+        Image(systemName: "tray.and.arrow.down.fill")
+            .font(.system(size: size * 0.48, weight: .semibold))
+            .foregroundStyle(.white)
+            .frame(width: size, height: size)
+            .background(Theme.gradient, in: RoundedRectangle(cornerRadius: size * 0.28, style: .continuous))
     }
 }
 
@@ -253,18 +279,22 @@ struct StatusPill: View {
 private struct MiniStat: View {
     let value: Int
     let label: String
+    let symbol: String
     let tint: Color
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 2) {
-                Text("\(value)").font(.title2.weight(.semibold)).monospacedDigit().foregroundStyle(value > 0 ? tint : .secondary)
+            VStack(spacing: 3) {
+                Image(systemName: symbol).font(.caption).foregroundStyle(value > 0 ? tint : .secondary)
+                Text("\(value)").font(.system(size: 18, weight: .bold, design: .rounded)).monospacedDigit()
+                    .foregroundStyle(value > 0 ? .primary : .secondary)
                 Text(label).font(.caption2).foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 6)
-            .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
+            .padding(.vertical, 8)
+            .background(value > 0 ? tint.opacity(0.09) : Color.primary.opacity(0.04),
+                        in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .buttonStyle(.plain)
     }
@@ -275,21 +305,21 @@ private struct MenuBarRow: View {
     let action: ProposedAction
 
     var body: some View {
-        HStack(spacing: 8) {
-            FileIcon(url: action.source, size: 20)
+        let lane = Lane.of(action.destinationFolder)
+        HStack(spacing: 10) {
+            LaneIcon(lane: lane, size: 26)
             VStack(alignment: .leading, spacing: 1) {
-                Text(action.originalName).lineLimit(1).truncationMode(.middle)
-                Text("→ \(action.destinationFolder)").font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.head)
+                Text(action.isRenamed ? action.finalName : action.originalName)
+                    .font(.callout.weight(.medium)).lineLimit(1).truncationMode(.middle)
+                Text(action.destinationFolder.split(separator: "/").last.map(String.init) ?? action.destinationFolder)
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer(minLength: 4)
             if !action.alerts.isEmpty { AlertIcons(alerts: action.alerts) }
-            Button("Approve", systemImage: "checkmark") { model.approve([action.id]) }
-                .labelStyle(.iconOnly).buttonStyle(.borderless).foregroundStyle(.green)
+            CircleIconButton(symbol: "checkmark", color: .green, help: "Approve") { model.approve([action.id]) }
                 .disabled(model.isApplying)
-            Button("Reject", systemImage: "xmark") { model.reject([action.id]) }
-                .labelStyle(.iconOnly).buttonStyle(.borderless).foregroundStyle(.red)
+            CircleIconButton(symbol: "xmark", color: .red, help: "Reject") { model.reject([action.id]) }
         }
-        .font(.callout)
-        .padding(.vertical, 5)
+        .padding(.vertical, 4)
     }
 }

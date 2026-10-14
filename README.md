@@ -1,4 +1,6 @@
-# File Organizer
+<img src="Resources/Icon/AppIcon-1024.png" width="128" alt="Directory Organizer icon">
+
+# Directory Organizer
 
 An offline macOS app that sorts new downloads into the right folders, with Finder tags.
 Simple deterministic rules handle the obvious cases. A small on-device language model is
@@ -163,6 +165,18 @@ phrase can't be told apart from a holiday picture, so nothing unread is ever fil
 
 `organize plan <folder> --quick` shows what the quick scan sees.
 
+## Design
+
+One idea runs through the app: **lanes**. Every destination has a color and a symbol
+(University blue, FSAE green, Secure red, Essays purple, Movies orange, Pictures pink, Review gray),
+used for the destination bar on Overview, the groups on Pending Approval, the menu-bar rows and
+the folder cards. The main action, **Organize Now**, is the one gradient button. Pages are
+rounded cards on the window background, in light and dark mode.
+
+The icon (three lane-colored files dropping into a tray, with a sparkle) is drawn in code:
+`swift scripts/make-icon.swift` regenerates `Resources/Icon/AppIcon-1024.png` and
+`Resources/AppIcon.icns`.
+
 ## The app (menu bar + dashboard)
 
 **Menu bar (compact):** status (watching / scanning / paused), **Organize Now** (with how many
@@ -174,8 +188,8 @@ Open Dashboard.
 
 | Page | Shows |
 |---|---|
-| Overview | counts (including waiting for Organize Now and the last run), what needs attention, last quick scan (folder, time, duration, skipped files), how files were decided (by rule, safety check, model), live activity log |
-| Pending Approval | files waiting for Organize Now (collapsible), then every proposed move in a table: alerts, file, destination (new folders marked), new name, tags, confidence, who decided. Filters (needs attention, model, rules, to review), search, approve/reject selected or all, rejected files. The detail panel has a Quick Look preview, the plan, alerts explained, and **every fact read from the file**: source URLs, dates, title, pages, image info, archive contents, and the text or OCR the decision was based on |
+| Overview | a header with the state and the main actions, four counts, **where your files are headed** (a bar split by destination), what needs attention, activity, last quick scan and Organize Now, model status |
+| Pending Approval | files waiting for Organize Now, then every proposed move **grouped by destination** (approve a whole group at once), with filters, search and ⌘-click multi-select. Each row: alerts, original and new name, the reason, who decided, a confidence ring, approve / reject. Rejected files have their own filter. The detail panel has a Quick Look preview, the plan, alerts explained, and **every fact read from the file**: source URLs, dates, title, pages, image info, archive contents, and the text or OCR the decision was based on |
 | Alerts | grouped by kind (sensitive, duplicate, rejected suggestion, name clash, unknown course), each explained |
 | History | every batch and move from the log, with undo per move or per batch |
 | Review Folder | what's waiting in `To Delete (Review)` and why, put-back, reminder schedule |

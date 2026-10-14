@@ -45,29 +45,6 @@ struct TagsView: View {
     }
 }
 
-/// A small bar plus percentage. Green when confident, orange when borderline, red when low.
-struct ConfidenceView: View {
-    let value: Double
-
-    var color: Color { value >= 0.9 ? .green : value >= 0.75 ? .orange : .red }
-
-    var body: some View {
-        HStack(spacing: 6) {
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    Capsule().fill(.quaternary)
-                    Capsule().fill(color).frame(width: geo.size.width * value)
-                }
-            }
-            .frame(width: 44, height: 5)
-            Text("\(Int((value * 100).rounded()))%")
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.secondary)
-                .frame(width: 34, alignment: .trailing)
-        }
-    }
-}
-
 extension DecisionSource {
     var label: String {
         switch self {
@@ -203,43 +180,6 @@ struct ThumbnailView: View {
     }
 }
 
-/// A number with a label, for the overview.
-struct StatCard: View {
-    let title: String
-    let value: String
-    let systemImage: String
-    var tint: Color = .accentColor
-    var detail: String? = nil
-    var action: (() -> Void)? = nil
-
-    var body: some View {
-        Button {
-            action?()
-        } label: {
-            VStack(alignment: .leading, spacing: 6) {
-                Label(title, systemImage: systemImage)
-                    .font(.subheadline)
-                    .foregroundStyle(tint)
-                Text(value)
-                    .font(.system(size: 28, weight: .semibold, design: .rounded))
-                    .monospacedDigit()
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.5)
-                Text(detail ?? " ")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2, reservesSpace: true)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(14)
-            .background(.background.secondary, in: RoundedRectangle(cornerRadius: 10))
-            .contentShape(RoundedRectangle(cornerRadius: 10))
-        }
-        .buttonStyle(.plain)
-        .disabled(action == nil)
-    }
-}
-
 /// A titled box for detail sections.
 struct DetailSection<Content: View>: View {
     let title: String
@@ -292,13 +232,20 @@ struct OrganizeNowControl: View {
     var compact = false
 
     var body: some View {
-        if let run = model.organizing {
+        if let run = model.organizing, compact {
+            HStack(spacing: 8) {
+                ProgressView(value: run.fraction).frame(width: 110)
+                Text("\(Int(run.fraction * 100))%").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                Button("Cancel") { model.cancelOrganize() }.buttonStyle(SoftButtonStyle(tint: .red))
+            }
+        } else if let run = model.organizing {
             VStack(alignment: .leading, spacing: 6) {
+                Label("Organizing…", systemImage: "wand.and.sparkles").font(.callout.weight(.semibold)).foregroundStyle(.purple)
                 HStack {
                     ProgressView(value: run.fraction)
                     Text("\(Int(run.fraction * 100))%").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                     Button("Cancel") { model.cancelOrganize() }
-                        .controlSize(.small)
+                        .buttonStyle(SoftButtonStyle(tint: .red))
                 }
                 if let progress = run.progress, !progress.file.isEmpty {
                     Text("\(progress.step.rawValue) \(progress.file)")
@@ -314,11 +261,13 @@ struct OrganizeNowControl: View {
             Button {
                 model.organizeNow()
             } label: {
-                Label(compact ? "Organize Now" : organizeTitle, systemImage: "wand.and.sparkles")
-                    .frame(maxWidth: compact ? nil : .infinity)
+                HStack(spacing: 8) {
+                    Image(systemName: "wand.and.sparkles")
+                    Text(compact ? "Organize Now" : organizeTitle)
+                }
+                .frame(maxWidth: compact ? nil : .infinity)
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(compact ? .regular : .large)
+            .buttonStyle(GradientButtonStyle(large: !compact))
             .disabled(model.isApplying || model.isUsingRealFolders)
             .help("Read everything in full (text recognition) and ask the model about files no rule can place")
         }

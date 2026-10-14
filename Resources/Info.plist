@@ -6,6 +6,8 @@
 	<string>Directory Organizer</string>
 	<key>CFBundleExecutable</key>
 	<string>DirectoryOrganizer</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
 	<key>CFBundleIdentifier</key>
 	<string>io.github.n1soryu.directory-organizer</string>
 	<key>CFBundleName</key>

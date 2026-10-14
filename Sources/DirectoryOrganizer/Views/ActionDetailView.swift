@@ -1,7 +1,7 @@
 import OrganizerCore
 import SwiftUI
 
-/// Everything about one proposed move: preview, where it goes and why, alerts, and every
+/// Everything about one proposed move: preview, a clear from → to, why, alerts, and every
 /// fact read from the file (the same facts the rules and the model saw).
 struct ActionDetailView: View {
     @Environment(AppModel.self) private var model
@@ -9,84 +9,96 @@ struct ActionDetailView: View {
     let isRejected: Bool
 
     var body: some View {
+        let lane = Lane.of(action.destinationFolder)
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 ThumbnailView(url: action.source)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .frame(maxWidth: .infinity)
+                    .padding(12)
+                    .background(Theme.page, in: RoundedRectangle(cornerRadius: Theme.radius, style: .continuous))
 
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(action.originalName).font(.title3.weight(.semibold)).textSelection(.enabled)
-                    if action.isRenamed {
-                        Label(action.finalName, systemImage: "arrow.turn.down.right")
-                            .foregroundStyle(.blue).textSelection(.enabled)
+                // From → To
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 10) {
+                        FileIcon(url: action.source, size: 24)
+                        Text(action.originalName).font(.headline).textSelection(.enabled).lineLimit(2)
                     }
+                    Image(systemName: "arrow.down")
+                        .font(.caption.weight(.bold)).foregroundStyle(.secondary)
+                        .padding(.leading, 7)
+                    HStack(alignment: .top, spacing: 10) {
+                        LaneIcon(lane: lane, size: 24)
+                        VStack(alignment: .leading, spacing: 3) {
+                            PathView(path: action.destinationFolder)
+                            Text(action.finalName)
+                                .font(.callout.weight(action.isRenamed ? .semibold : .regular))
+                                .foregroundStyle(action.isRenamed ? .blue : .secondary)
+                                .textSelection(.enabled)
+                            if !action.createsFolders.isEmpty {
+                                Chip(text: "Creates " + action.createsFolders.map { $0.split(separator: "/").last.map(String.init) ?? $0 }.joined(separator: ", "),
+                                     symbol: "folder.badge.plus", color: .orange)
+                            }
+                        }
+                    }
+                }
+                .padding(14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(lane.color.opacity(0.07), in: RoundedRectangle(cornerRadius: Theme.radius, style: .continuous))
+
+                HStack(spacing: 10) {
+                    ConfidenceRing(value: action.confidence, size: 36)
+                    VStack(alignment: .leading, spacing: 2) {
+                        DecidedByView(source: action.decidedBy)
+                        Text(action.reason).font(.callout).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                if !action.tags.isEmpty {
+                    HStack { Text("Tags").foregroundStyle(.secondary); TagsView(tags: action.tags) }.font(.callout)
                 }
 
                 buttons
 
-                DetailSection(title: "Plan") {
-                    InfoRow(label: "Goes to", value: action.destinationFolder)
-                    InfoRow(label: "Full path", value: model.display(model.homeURL.appending(path: action.destinationPath).path))
-                    if !action.createsFolders.isEmpty {
-                        InfoRow(label: "New folders", value: action.createsFolders.joined(separator: "\n"))
-                    }
-                    HStack(alignment: .firstTextBaseline) {
-                        Text("Tags").foregroundStyle(.secondary).frame(width: 110, alignment: .leading)
-                        if action.tags.isEmpty { Text("none").foregroundStyle(.tertiary) } else { TagsView(tags: action.tags) }
-                    }
-                    .font(.callout)
-                    HStack(alignment: .firstTextBaseline) {
-                        Text("Confidence").foregroundStyle(.secondary).frame(width: 110, alignment: .leading)
-                        ConfidenceView(value: action.confidence)
-                    }
-                    .font(.callout)
-                    HStack(alignment: .firstTextBaseline) {
-                        Text("Decided by").foregroundStyle(.secondary).frame(width: 110, alignment: .leading)
-                        DecidedByView(source: action.decidedBy)
-                    }
-                    .font(.callout)
-                    InfoRow(label: "Why", value: action.reason)
-                }
-
-                if !action.alerts.isEmpty {
-                    DetailSection(title: "Alerts") {
-                        ForEach(action.alerts, id: \.self) { alert in
-                            VStack(alignment: .leading, spacing: 3) {
-                                Label(alert.kind.title, systemImage: alert.kind.systemImage)
-                                    .foregroundStyle(alert.kind.color).fontWeight(.medium)
-                                Text(alert.message).textSelection(.enabled)
-                                Text(alert.kind.explanation).font(.caption).foregroundStyle(.secondary)
-                            }
-                            .padding(10)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(alert.kind.color.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+                ForEach(action.alerts, id: \.self) { alert in
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: alert.kind.systemImage)
+                            .foregroundStyle(alert.kind.color)
+                            .frame(width: 28, height: 28)
+                            .background(alert.kind.color.opacity(0.14), in: Circle())
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(alert.kind.title).fontWeight(.semibold)
+                            Text(alert.message).font(.callout).textSelection(.enabled)
+                            Text(alert.kind.explanation).font(.caption).foregroundStyle(.secondary)
                         }
                     }
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(alert.kind.color.opacity(0.08), in: RoundedRectangle(cornerRadius: Theme.smallRadius, style: .continuous))
                 }
 
                 if let facts = action.facts {
                     FactsSection(facts: facts)
                 }
             }
-            .padding()
+            .padding(18)
         }
     }
 
     private var buttons: some View {
-        HStack {
+        HStack(spacing: 8) {
             if isRejected {
-                Button("Put Back in Plan") { model.reconsider([action.id]) }
+                Button("Put back in plan") { model.reconsider([action.id]) }.buttonStyle(SoftButtonStyle())
             } else {
-                Button("Approve", systemImage: "checkmark") { model.approve([action.id]) }
-                    .buttonStyle(.borderedProminent)
+                Button { model.approve([action.id]) } label: { Label("Approve", systemImage: "checkmark") }
+                    .buttonStyle(GradientButtonStyle())
                     .disabled(model.isApplying)
-                Button("Reject", systemImage: "xmark") { model.reject([action.id]) }
+                Button { model.reject([action.id]) } label: { Label("Reject", systemImage: "xmark") }
+                    .buttonStyle(SoftButtonStyle(tint: .red))
             }
             Spacer()
-            Button("Open", systemImage: "arrow.up.forward.app") { NSWorkspace.shared.open(action.source) }
-                .labelStyle(.iconOnly).help("Open the file")
-            Button("Show in Finder", systemImage: "folder") { model.reveal(action.source) }
-                .labelStyle(.iconOnly).help("Show in Finder")
+            Button { NSWorkspace.shared.open(action.source) } label: { Image(systemName: "arrow.up.forward.app") }
+                .buttonStyle(SoftButtonStyle(tint: .secondary)).help("Open the file")
+            Button { model.reveal(action.source) } label: { Image(systemName: "folder") }
+                .buttonStyle(SoftButtonStyle(tint: .secondary)).help("Show in Finder")
         }
     }
 }
@@ -97,6 +109,7 @@ struct FactsSection: View {
 
     var body: some View {
         DetailSection(title: "What was read from the file") {
+            Divider()
             InfoRow(label: "Type", value: "\(facts.kind.rawValue)\(facts.fileExtension.isEmpty ? "" : " (.\(facts.fileExtension))")")
             InfoRow(label: "Size", value: facts.size.fileSize)
             InfoRow(label: "Downloaded", value: facts.downloadDate.short)
@@ -148,7 +161,7 @@ struct FactsSection: View {
                             .padding(8)
                     }
                     .frame(maxHeight: 220)
-                    .background(.background.secondary, in: RoundedRectangle(cornerRadius: 6))
+                    .background(Theme.page, in: RoundedRectangle(cornerRadius: Theme.smallRadius, style: .continuous))
                 }
                 .padding(.top, 4)
             }

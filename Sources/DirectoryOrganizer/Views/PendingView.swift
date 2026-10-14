@@ -1,7 +1,9 @@
+import AppKit
 import OrganizerCore
 import SwiftUI
 
-/// Every proposed move in a table. Select rows to see full details, approve or reject them.
+/// Every proposed move, grouped into one card per destination ("lane"). Click a file for
+/// all its details; ⌘-click to select several. Approve one, a whole group, or everything.
 struct PendingView: View {
     @Environment(AppModel.self) private var model
     @ViewState private var filter: Filter = .all
@@ -11,125 +13,67 @@ struct PendingView: View {
 
     enum Filter: String, CaseIterable, Identifiable {
         case all = "All"
-        case attention = "Needs attention"
-        case model = "Model"
-        case rules = "Rules"
+        case attention = "Needs a look"
+        case model = "By the model"
+        case rules = "By rules"
         case review = "To review"
         var id: Self { self }
     }
 
     var body: some View {
-        @Bindable var model = model
-        let rows = filtered
-        VStack(spacing: 0) {
-            if !model.waiting.isEmpty && !showRejected {
-                DisclosureGroup {
-                    WaitingList(limit: 8)
-                        .padding(.top, 4)
-                } label: {
-                    HStack {
-                        Label("\(model.waiting.count) file\(model.waiting.count == 1 ? "" : "s") waiting for Organize Now",
-                              systemImage: "wand.and.sparkles")
-                            .foregroundStyle(.purple)
-                        Text("images and scans need text recognition; others need the model")
-                            .font(.caption).foregroundStyle(.secondary)
+        let groups = grouped
+        Page {
+            HStack(spacing: 8) {
+                ForEach(Filter.allCases) { item in
+                    FilterChip(title: item.rawValue, isOn: filter == item && !showRejected) {
+                        filter = item
+                        showRejected = false
                     }
                 }
-                .padding(10)
-                .background(.purple.opacity(0.06))
-            }
-            Table(rows, selection: $model.selection) {
-                TableColumn("") { action in
-                    StatusCell(action: action)
+                FilterChip(title: "Rejected \(model.rejected.count)", isOn: showRejected) { showRejected.toggle() }
+                Spacer()
+                if !showRejected {
+                    Button("Approve all \(model.pending.count)") { model.approveAll() }
+                        .buttonStyle(GradientButtonStyle())
+                        .disabled(model.pending.isEmpty || model.isApplying)
                 }
-                .width(28)
-                TableColumn("File") { action in
-                    HStack(spacing: 6) {
-                        FileIcon(url: action.source)
-                        Text(action.originalName).lineLimit(1).truncationMode(.middle)
-                    }
-                }
-                .width(min: 140, ideal: 200)
-                TableColumn("Goes to") { action in
-                    DestinationCell(action: action)
-                }
-                .width(min: 140, ideal: 210)
-                TableColumn("New name") { action in
-                    Text(action.isRenamed ? action.finalName : "–")
-                        .foregroundStyle(action.isRenamed ? .primary : .tertiary)
-                        .lineLimit(1).truncationMode(.middle)
-                }
-                .width(min: 90, ideal: 170)
-                TableColumn("Tags") { action in
-                    TagsView(tags: action.tags)
-                }
-                .width(min: 70, ideal: 90)
-                TableColumn("Confidence") { action in
-                    ConfidenceView(value: action.confidence)
-                }
-                .width(90)
-                TableColumn("Decided by") { action in
-                    DecidedByView(source: action.decidedBy)
-                }
-                .width(min: 100, ideal: 130)
-            }
-            .contextMenu(forSelectionType: ProposedAction.ID.self) { ids in
-                if showRejected {
-                    Button("Put Back in Plan") { model.reconsider(ids) }
-                } else {
-                    Button("Approve") { model.approve(ids) }
-                    Button("Reject (leave in place)") { model.reject(ids) }
-                }
-                Divider()
-                Button("Show in Finder") {
-                    for id in ids { model.reveal(URL(filePath: id)) }
-                }
-            }
-            .overlay {
-                if rows.isEmpty { emptyState }
             }
 
-            bottomBar
+            if !model.waiting.isEmpty && !showRejected {
+                WaitingCard()
+            }
+
+            if groups.isEmpty {
+                emptyState
+            } else {
+                ForEach(groups, id: \.folder) { group in
+                    LaneCard(folder: group.folder, actions: group.actions, isRejected: showRejected)
+                }
+            }
         }
         .searchable(text: $search, placement: .toolbar, prompt: "Search files, folders, reasons")
         .toolbar {
             ToolbarItem {
-                Picker("Show", selection: $filter) {
-                    ForEach(Filter.allCases) { Text($0.rawValue).tag($0) }
-                }
-                .pickerStyle(.menu)
-                .disabled(showRejected)
-            }
-            ToolbarItem {
-                Toggle(isOn: $showRejected) {
-                    Label("Rejected (\(model.rejected.count))", systemImage: "hand.raised")
-                }
-                .help("Files you rejected: they stay where they are")
-            }
-            ToolbarItem {
-                Button("Scan", systemImage: "arrow.clockwise") { model.requestScan() }
-                    .disabled(model.isScanning)
-            }
-            ToolbarItem {
                 Button("Details", systemImage: "sidebar.trailing") { showInspector.toggle() }
+                    .help("Show or hide the details panel")
             }
         }
         .inspector(isPresented: $showInspector) {
-            inspector
-                .inspectorColumnWidth(min: 320, ideal: 400, max: 560)
+            inspector.inspectorColumnWidth(min: 320, ideal: 380, max: 520)
         }
     }
 
     private var source: [ProposedAction] { showRejected ? model.rejected : model.pending }
 
-    private var filtered: [ProposedAction] {
+    /// Filtered actions grouped by destination folder, in lane order, alerts first inside each.
+    private var grouped: [(folder: String, actions: [ProposedAction])] {
         let review = OrganizerConfig().reviewFolder
         var rows = source
         if !showRejected {
             switch filter {
             case .all: break
             case .attention: rows = rows.filter { !$0.alerts.isEmpty || $0.confidence < 0.9 }
-            case .model: rows = rows.filter { if case .classifier = $0.decidedBy { true } else { $0.reason.contains("model") } }
+            case .model: rows = rows.filter { if case .classifier = $0.decidedBy { true } else { $0.reason.contains("by the model") } }
             case .rules: rows = rows.filter { if case .rule = $0.decidedBy { true } else { false } }
             case .review: rows = rows.filter { $0.destinationFolder == review }
             }
@@ -139,10 +83,16 @@ struct PendingView: View {
                 [$0.originalName, $0.finalName, $0.destinationFolder, $0.reason].contains { $0.localizedCaseInsensitiveContains(search) }
             }
         }
-        // Alerts first, then by destination.
-        return rows.sorted {
-            ($0.alerts.isEmpty ? 1 : 0, $0.destinationFolder, $0.originalName) < ($1.alerts.isEmpty ? 1 : 0, $1.destinationFolder, $1.originalName)
-        }
+        return Dictionary(grouping: rows, by: \.destinationFolder)
+            .map { folder, actions in
+                (folder, actions.sorted { ($0.alerts.isEmpty ? 1 : 0, $0.originalName) < ($1.alerts.isEmpty ? 1 : 0, $1.originalName) })
+            }
+            .sorted {
+                let a = Lane.order.firstIndex(of: Lane.of($0.0).name) ?? 99
+                let b = Lane.order.firstIndex(of: Lane.of($1.0).name) ?? 99
+                return a != b ? a < b : $0.0 < $1.0
+            }
+            .map { (folder: $0.0, actions: $0.1) }
     }
 
     @ViewBuilder private var inspector: some View {
@@ -152,93 +102,191 @@ struct PendingView: View {
         } else if selected.count > 1 {
             MultiSelectionView(actions: selected, isRejected: showRejected)
         } else {
-            ContentUnavailableView("Select a file", systemImage: "doc.text.magnifyingglass",
-                                   description: Text("See everything read from it and why it goes where it goes."))
+            ContentUnavailableView("Select a file", systemImage: "hand.point.up.left",
+                                   description: Text("See a preview, where it goes and why, and everything read from it."))
         }
     }
 
-    private var emptyState: some View {
-        Group {
-            if model.isScanning {
-                ContentUnavailableView { Label("Scanning…", systemImage: "magnifyingglass") }
-            } else if showRejected {
-                ContentUnavailableView("No rejected files", systemImage: "hand.raised",
-                                       description: Text("Files you reject stay where they are and show up here."))
-            } else if !search.isEmpty || filter != .all {
-                ContentUnavailableView.search
-            } else {
-                ContentUnavailableView("All caught up", systemImage: "checkmark.circle",
-                                       description: Text("New files in \(model.display(model.watchedURL)) will appear here."))
+    @ViewBuilder private var emptyState: some View {
+        Card {
+            Group {
+                if model.isScanning {
+                    ContentUnavailableView { Label("Scanning…", systemImage: "magnifyingglass") }
+                } else if showRejected {
+                    ContentUnavailableView("No rejected files", systemImage: "hand.raised",
+                                           description: Text("Files you reject stay where they are and show up here."))
+                } else if !search.isEmpty || filter != .all {
+                    ContentUnavailableView.search
+                } else {
+                    ContentUnavailableView("All caught up", systemImage: "checkmark.circle",
+                                           description: Text("New files in \(model.display(model.watchedURL)) appear here within seconds."))
+                }
             }
+            .frame(maxWidth: .infinity, minHeight: 260)
         }
-    }
-
-    private var bottomBar: some View {
-        let selected = model.selection.intersection(Set(source.map(\.id)))
-        return HStack(spacing: 10) {
-            Text(summary).font(.callout).foregroundStyle(.secondary)
-            Spacer()
-            if showRejected {
-                Button("Put Back in Plan") { model.reconsider(selected) }
-                    .disabled(selected.isEmpty)
-            } else {
-                Button("Reject Selected") { model.reject(selected) }
-                    .disabled(selected.isEmpty)
-                Button("Approve Selected (\(selected.count))") { model.approve(selected) }
-                    .disabled(selected.isEmpty || model.isApplying)
-                Button("Approve All (\(model.pending.count))") { model.approveAll() }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(model.pending.isEmpty || model.isApplying)
-            }
-        }
-        .padding(10)
-        .background(.bar)
-    }
-
-    private var summary: String {
-        let shown = filtered.count
-        let newFolders = Set(source.flatMap(\.createsFolders)).count
-        return "\(shown) of \(source.count) shown · \(newFolders) new folder\(newFolders == 1 ? "" : "s") would be created"
     }
 }
 
-private struct StatusCell: View {
-    let action: ProposedAction
+private struct FilterChip: View {
+    let title: String
+    let isOn: Bool
+    let action: () -> Void
 
     var body: some View {
-        if !action.alerts.isEmpty {
-            AlertIcons(alerts: action.alerts)
-        } else if action.destinationFolder == OrganizerConfig().reviewFolder {
-            Image(systemName: "archivebox").foregroundStyle(.orange).help("Goes to the review folder")
-        } else {
-            Image(systemName: "checkmark.circle").foregroundStyle(.green.opacity(0.7))
+        Button(action: action) {
+            Text(title)
+                .font(.callout.weight(isOn ? .semibold : .regular))
+                .foregroundStyle(isOn ? Color.white : .primary)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(isOn ? AnyShapeStyle(Theme.gradient) : AnyShapeStyle(Theme.card), in: Capsule())
+                .overlay(Capsule().strokeBorder(.separator.opacity(isOn ? 0 : 0.6)))
         }
+        .buttonStyle(.plain)
     }
 }
 
-private struct DestinationCell: View {
-    let action: ProposedAction
+/// Files the quick scan couldn't decide, with the button that decides them.
+private struct WaitingCard: View {
+    @Environment(AppModel.self) private var model
+    @ViewState private var expanded = false
 
     var body: some View {
-        HStack(spacing: 4) {
-            if action.destinationFolder == OrganizerConfig().reviewFolder {
-                Label("Review folder", systemImage: "archivebox").foregroundStyle(.orange)
-            } else {
-                Text(action.destinationFolder).lineLimit(1).truncationMode(.middle)
-                    .help(action.destinationFolder)
-            }
-            if !action.createsFolders.isEmpty {
-                Text("NEW")
-                    .font(.caption2.weight(.bold))
-                    .padding(.horizontal, 4)
-                    .background(.yellow.opacity(0.3), in: RoundedRectangle(cornerRadius: 3))
-                    .help("Creates: " + action.createsFolders.joined(separator: ", "))
+        Card {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 12) {
+                    Image(systemName: "wand.and.sparkles")
+                        .font(.title3).foregroundStyle(.white)
+                        .frame(width: 38, height: 38)
+                        .background(Theme.gradient, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("\(model.waiting.count) file\(model.waiting.count == 1 ? "" : "s") waiting for Organize Now")
+                            .font(.headline)
+                        Text("Images and scans need text recognition; the rest need the model.")
+                            .font(.callout).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button(expanded ? "Hide" : "Show") { withAnimation(.snappy) { expanded.toggle() } }
+                        .buttonStyle(SoftButtonStyle(tint: .purple))
+                    OrganizeNowControl(compact: true)
+                        .frame(minWidth: model.organizing == nil ? nil : 240)
+                }
+                if expanded {
+                    WaitingList(limit: 30)
+                        .padding(.leading, 50)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                }
             }
         }
     }
 }
 
-/// Several rows selected: a summary and bulk actions.
+/// One destination: header with the lane, path, tags and a group approve, then its files.
+private struct LaneCard: View {
+    @Environment(AppModel.self) private var model
+    let folder: String
+    let actions: [ProposedAction]
+    let isRejected: Bool
+
+    var body: some View {
+        let lane = Lane.of(folder)
+        let creates = actions.flatMap(\.createsFolders).contains(folder)
+        Card(padding: 0) {
+            VStack(spacing: 0) {
+                HStack(spacing: 12) {
+                    LaneIcon(lane: lane, size: 32)
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: 8) {
+                            if folder == OrganizerConfig().reviewFolder {
+                                Text("Review folder").font(.headline)
+                            } else {
+                                PathView(path: folder, font: .headline)
+                            }
+                            if creates { Chip(text: "New folder", symbol: "plus", color: .orange) }
+                        }
+                        Text("\(actions.count) file\(actions.count == 1 ? "" : "s")").font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    if let tags = actions.first?.tags, !tags.isEmpty { TagsView(tags: tags) }
+                    if !isRejected {
+                        Button("Approve \(actions.count)") { model.approve(Set(actions.map(\.id))) }
+                            .buttonStyle(SoftButtonStyle(tint: lane.color == .secondary ? .accentColor : lane.color))
+                            .disabled(model.isApplying)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .background(lane.color.opacity(0.06))
+
+                ForEach(actions) { action in
+                    Divider().padding(.leading, 16)
+                    FileRow(action: action, isRejected: isRejected)
+                }
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: Theme.radius, style: .continuous))
+    }
+}
+
+private struct FileRow: View {
+    @Environment(AppModel.self) private var model
+    let action: ProposedAction
+    let isRejected: Bool
+    @ViewState private var hovering = false
+
+    var body: some View {
+        let selected = model.selection.contains(action.id)
+        HStack(spacing: 12) {
+            FileIcon(url: action.source, size: 30)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(action.originalName).fontWeight(.medium).lineLimit(1).truncationMode(.middle)
+                if action.isRenamed {
+                    Label(action.finalName, systemImage: "arrow.turn.down.right")
+                        .font(.caption).foregroundStyle(.blue).lineLimit(1).truncationMode(.middle)
+                }
+                Text(action.reason).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
+            Spacer(minLength: 8)
+            if !action.alerts.isEmpty { AlertIcons(alerts: action.alerts) }
+            Image(systemName: action.decidedBy.systemImage)
+                .foregroundStyle(action.decidedBy.color.opacity(0.8))
+                .help(action.decidedBy.label)
+            ConfidenceRing(value: action.confidence)
+            if isRejected {
+                Button("Put back") { model.reconsider([action.id]) }.buttonStyle(SoftButtonStyle())
+            } else {
+                CircleIconButton(symbol: "checkmark", color: .green, help: "Approve") { model.approve([action.id]) }
+                    .disabled(model.isApplying)
+                CircleIconButton(symbol: "xmark", color: .red, help: "Reject: leave it where it is") { model.reject([action.id]) }
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(selected ? Color.accentColor.opacity(0.12) : hovering ? Color.primary.opacity(0.04) : .clear)
+        .contentShape(Rectangle())
+        .onHover { hovering = $0 }
+        .onTapGesture {
+            if NSEvent.modifierFlags.contains(.command) {
+                if selected { model.selection.remove(action.id) } else { model.selection.insert(action.id) }
+            } else {
+                model.selection = [action.id]
+            }
+        }
+        .contextMenu {
+            if isRejected {
+                Button("Put Back in Plan") { model.reconsider([action.id]) }
+            } else {
+                Button("Approve") { model.approve([action.id]) }
+                Button("Reject (leave in place)") { model.reject([action.id]) }
+            }
+            Divider()
+            Button("Open") { NSWorkspace.shared.open(action.source) }
+            Button("Show in Finder") { model.reveal(action.source) }
+        }
+    }
+}
+
+/// Several files selected: where they go, and bulk actions.
 private struct MultiSelectionView: View {
     @Environment(AppModel.self) private var model
     let actions: [ProposedAction]
@@ -248,31 +296,32 @@ private struct MultiSelectionView: View {
         let ids = Set(actions.map(\.id))
         let byFolder = Dictionary(grouping: actions, by: \.destinationFolder).sorted { $0.key < $1.key }
         ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                Text("\(actions.count) files selected").font(.title3.weight(.semibold))
-                DetailSection(title: "Destinations") {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("\(actions.count) files selected").font(.title2.weight(.bold))
+                VStack(alignment: .leading, spacing: 8) {
                     ForEach(byFolder, id: \.key) { folder, items in
-                        HStack {
-                            Image(systemName: "folder")
-                            Text(folder).lineLimit(1).truncationMode(.head)
+                        HStack(spacing: 10) {
+                            LaneIcon(lane: Lane.of(folder), size: 22)
+                            PathView(path: folder, font: .callout)
                             Spacer()
                             Text("\(items.count)").monospacedDigit().foregroundStyle(.secondary)
                         }
-                        .font(.callout)
                     }
                 }
                 if isRejected {
-                    Button("Put Back in Plan") { model.reconsider(ids) }
+                    Button("Put back in plan") { model.reconsider(ids) }.buttonStyle(SoftButtonStyle())
                 } else {
                     HStack {
                         Button("Approve \(actions.count)") { model.approve(ids) }
-                            .buttonStyle(.borderedProminent)
+                            .buttonStyle(GradientButtonStyle())
                             .disabled(model.isApplying)
                         Button("Reject \(actions.count)") { model.reject(ids) }
+                            .buttonStyle(SoftButtonStyle(tint: .red))
                     }
                 }
+                Button("Clear selection") { model.selection = [] }.buttonStyle(.link)
             }
-            .padding()
+            .padding(20)
         }
     }
 }

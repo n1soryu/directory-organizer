@@ -10,22 +10,28 @@ struct HistoryView: View {
         let records = model.records.filter { showUndone || $0.state != .undone }
         let batches = Dictionary(grouping: records, by: \.batchID)
             .sorted { ($0.value.map(\.time).min() ?? .distantPast) > ($1.value.map(\.time).min() ?? .distantPast) }
-        Group {
+        Page {
+            SectionTitle(title: "History", subtitle: "Every move, grouped by when you approved it. Anything still in place can be put back exactly as it was.")
             if batches.isEmpty {
-                ContentUnavailableView("No moves yet", systemImage: "clock.arrow.circlepath",
-                                       description: Text("Approved moves appear here, and every one can be undone."))
-            } else {
-                List {
-                    ForEach(batches, id: \.key) { batchID, moves in
-                        Section {
-                            ForEach(moves.sorted { $0.time > $1.time }, id: \.moveID) { move in
-                                HistoryRow(move: move)
-                            }
-                        } header: {
-                            BatchHeader(batchID: batchID, moves: moves)
+                Card {
+                    ContentUnavailableView("No moves yet", systemImage: "clock.arrow.circlepath",
+                                           description: Text("Approved moves appear here, and every one can be undone."))
+                        .frame(maxWidth: .infinity, minHeight: 240)
+                }
+            }
+            ForEach(batches, id: \.key) { batchID, moves in
+                Card(padding: 0) {
+                    VStack(spacing: 0) {
+                        BatchHeader(batchID: batchID, moves: moves)
+                            .padding(.horizontal, 16).padding(.vertical, 12)
+                            .background(Color.primary.opacity(0.03))
+                        ForEach(moves.sorted { $0.time > $1.time }, id: \.moveID) { move in
+                            Divider().padding(.leading, 16)
+                            HistoryRow(move: move).padding(.horizontal, 16).padding(.vertical, 6)
                         }
                     }
                 }
+                .clipShape(RoundedRectangle(cornerRadius: Theme.radius, style: .continuous))
             }
         }
         .toolbar {
@@ -55,7 +61,8 @@ private struct BatchHeader: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
-            Button("Undo Batch", systemImage: "arrow.uturn.backward") { model.undoBatch(batchID) }
+            Button { model.undoBatch(batchID) } label: { Label("Undo batch", systemImage: "arrow.uturn.backward") }
+                .buttonStyle(SoftButtonStyle(tint: .orange))
                 .disabled(moved == 0 || model.isApplying)
         }
         .padding(.vertical, 4)
@@ -69,7 +76,7 @@ private struct HistoryRow: View {
     var body: some View {
         let current = URL(filePath: move.state == .undone ? (move.restoredPath ?? move.originalPath) : move.movedPath)
         HStack(alignment: .top, spacing: 10) {
-            FileIcon(url: current, size: 24)
+            LaneIcon(lane: Lane.of(model.homeRelative(move.movedPath)), size: 26)
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
                     StateBadge(state: move.state)

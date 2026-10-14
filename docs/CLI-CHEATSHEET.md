@@ -28,6 +28,7 @@ starts instantly. All examples below work with either.
 | `open "build/Directory Organizer.app"` | Open the app (menu-bar tray icon + dashboard) |
 | `pkill -x DirectoryOrganizer` | Quit it from the terminal (or: menu bar → Quit) |
 | `swift run DirectoryOrganizer` | Run without bundling (no notifications, shows a Dock icon) |
+| `swift scripts/make-icon.swift` | Redraw the app icon (`Resources/AppIcon.icns`); then rebuild the app |
 | `open ~/Library/Application\ Support/DirectoryOrganizer` | The app's settings file |
 | `rm ~/Library/Application\ Support/DirectoryOrganizer/settings.json` | Reset the app's settings (quit it first) |
 

@@ -120,6 +120,8 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
+        .scrollContentBackground(.hidden)
+        .background(Theme.page)
     }
 
     private func folderRow(_ label: String, path: String, set: @escaping (URL) -> Void) -> some View {
