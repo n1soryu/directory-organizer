@@ -233,15 +233,20 @@ struct OrganizeNowControl: View {
 
     var body: some View {
         if let run = model.organizing, compact {
-            HStack(spacing: 8) {
+            HStack(spacing: 10) {
                 ProgressView(value: run.fraction).frame(width: 110)
                 Text("\(Int(run.fraction * 100))%").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                 Button("Cancel") { model.cancelOrganize() }.buttonStyle(SoftButtonStyle(tint: .red))
             }
+            // Room between the bar and the edge of its capsule.
+            .padding(.leading, 16)
+            .padding(.trailing, 4)
+            .padding(.vertical, 4)
+            .background(Color.purple.opacity(0.08), in: Capsule())
         } else if let run = model.organizing {
             VStack(alignment: .leading, spacing: 6) {
                 Label("Organizing…", systemImage: "wand.and.sparkles").font(.callout.weight(.semibold)).foregroundStyle(.purple)
-                HStack {
+                HStack(spacing: 10) {
                     ProgressView(value: run.fraction)
                     Text("\(Int(run.fraction * 100))%").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                     Button("Cancel") { model.cancelOrganize() }
@@ -257,6 +262,9 @@ struct OrganizeNowControl: View {
                         .font(.caption2).foregroundStyle(.tertiary)
                 }
             }
+            // Room between the bar and the panel's edge.
+            .padding(14)
+            .background(Color.purple.opacity(0.07), in: RoundedRectangle(cornerRadius: Theme.radius, style: .continuous))
         } else {
             Button {
                 model.organizeNow()
