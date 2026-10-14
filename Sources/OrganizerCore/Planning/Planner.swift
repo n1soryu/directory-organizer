@@ -13,6 +13,13 @@ public struct Planner: Sendable {
     /// If set, items that arrived in the folder before this date are left alone entirely
     /// (not read, not listed): only new downloads are organized.
     public var onlyAddedAfter: Date?
+    /// A folder changed less than this long ago is left until it's quiet: it may still be
+    /// being unzipped or copied.
+    public var settleTime: TimeInterval = 30
+    /// How many folder levels the model may unpack, and the most files a folder may hold to
+    /// be unpacked at all. Bigger folders stay together.
+    public var maxUnpackDepth = 2
+    public var maxUnpackItems = 200
 
     public enum Mode: Sendable {
         /// Rules only: no text recognition, no model. Seconds, not minutes. Files that need
@@ -57,6 +64,7 @@ public struct Planner: Sendable {
 
         var skipped: [SkippedItem] = []
         var facts: [FileFacts] = []
+        var unpacked: [URL] = []
         let candidates = urls.filter { url in
             if Self.incompleteExtensions.contains(url.pathExtension.lowercased()) {
                 skipped.append(SkippedItem(name: url.lastPathComponent, reason: "download still in progress"))
@@ -71,6 +79,21 @@ public struct Planner: Sendable {
             progress?(Progress(done: index, total: total, file: url.lastPathComponent, step: .reading))
             facts.append(await extractor.facts(for: url))
         }
+        // Folders still being written are left until they've been quiet for a while.
+        let now = Date()
+        facts.removeAll { item in
+            guard item.isDirectory, let changed = item.folder?.newestChange,
+                  now.timeIntervalSince(changed) < settleTime else { return false }
+            skipped.append(SkippedItem(name: item.name, reason: "folder still changing (being unzipped or copied?)",
+                                       retryAfter: max(1, settleTime - now.timeIntervalSince(changed))))
+            return true
+        }
+        // Organize Now: the model decides, folder by folder, to keep it together or unpack it.
+        if mode == .full {
+            facts = try await unpacking(facts, depth: 0, into: &unpacked)
+        }
+        let decidingTotal = candidates.count + facts.count
+
         // Oldest download first, so the first copy of a duplicate counts as the original.
         facts.sort { a, b in
             a.downloadDate != b.downloadDate
@@ -88,8 +111,8 @@ public struct Planner: Sendable {
 
         for (index, item) in facts.enumerated() {
             try Task.checkCancellation()
-            progress?(Progress(done: candidates.count + index, total: total, file: item.name, step: .deciding))
-            let decision: Decision
+            progress?(Progress(done: candidates.count + index, total: decidingTotal, file: item.name, step: .deciding))
+            var decision: Decision
             if let original = copies[item.url] {
                 decision = Decision(
                     destination: config.reviewFolder,
@@ -104,12 +127,45 @@ public struct Planner: Sendable {
             } else {
                 decision = await decide(item, folders: folders, newFolders: &newFolders)
             }
+            let parent = item.url.deletingLastPathComponent()
+            if parent.standardizedFileURL.path != folder.standardizedFileURL.path {
+                decision.reason = "From \(parent.lastPathComponent)/: \(decision.reason)"
+            }
             actions.append(resolve(item, decision, &hashes, &reserved))
         }
-        progress?(Progress(done: total, total: total, file: "", step: .deciding))
+        progress?(Progress(done: decidingTotal, total: decidingTotal, file: "", step: .deciding))
 
-        return Plan(createdAt: Date(), inputFolder: folder, homeRoot: homeRoot, actions: actions,
-                    skipped: skipped, waiting: waiting)
+        var plan = Plan(createdAt: Date(), inputFolder: folder, homeRoot: homeRoot, actions: actions,
+                        skipped: skipped, waiting: waiting)
+        plan.unpacked = unpacked
+        return plan
+    }
+
+    /// Replaces each folder the model says to unpack with what's inside it, recursively up to
+    /// `maxUnpackDepth`. Folders a rule claims (code projects, sensitive contents, empty) and
+    /// folders too big to check fully are never unpacked; without a model nothing is.
+    func unpacking(_ items: [FileFacts], depth: Int, into unpacked: inout [URL]) async throws -> [FileFacts] {
+        var result: [FileFacts] = []
+        for item in items {
+            try Task.checkCancellation()
+            guard item.isDirectory, depth < maxUnpackDepth, let contents = item.folder, !contents.truncated,
+                  contents.fileCount <= maxUnpackItems, rules.decide(item, config: config) == nil,
+                  let suggestion = try? await classifier.suggestUnpack(for: item),
+                  suggestion.unpack, suggestion.confidence >= config.confidenceThreshold
+            else {
+                result.append(item)
+                continue
+            }
+            let children = (try? FileManager.default.contentsOfDirectory(
+                at: item.url, includingPropertiesForKeys: [.addedToDirectoryDateKey], options: [.skipsHiddenFiles])) ?? []
+            var inside: [FileFacts] = []
+            for child in children where !Self.incompleteExtensions.contains(child.pathExtension.lowercased()) {
+                inside.append(await extractor.facts(for: child))
+            }
+            unpacked.append(item.url)
+            result += try await unpacking(inside, depth: depth + 1, into: &unpacked)
+        }
+        return result
     }
 
     /// When an item arrived in its folder: the date it was added, else when it was created.
@@ -121,11 +177,16 @@ public struct Planner: Sendable {
 
     /// Quick scans: why a file has to wait for a full run, or nil if rules can decide it now.
     func waitReason(_ facts: FileFacts) -> String? {
-        // Checked before any rule: an unread image could hold a recovery phrase.
+        let ruled = rules.decide(facts, config: config)
+        // Something sensitive already found: report it now, don't wait for the rest.
+        if case .safety = ruled?.source { return nil }
+        // Checked before other rules: an unread image could hold a recovery phrase.
         if facts.needsDeepRead {
+            if facts.isDirectory { return "has images or scans inside that need text recognition" }
             return facts.kind == .image ? "needs text recognition (could contain sensitive text)" : "scanned pages need text recognition"
         }
-        return rules.decide(facts, config: config) == nil ? "no rule fits; needs the model" : nil
+        guard ruled == nil else { return nil }
+        return facts.isDirectory ? "folder: the model decides whether to keep it together or unpack it" : "no rule fits; needs the model"
     }
 
     /// Rules first; the classifier only for files no rule could place. Every answer is checked.

@@ -27,6 +27,7 @@ public struct RulesEngine: Sendable {
         SensitiveFileRule(),
         InstallerRule(),
         CodeProjectRule(),
+        EmptyFolderRule(),
         // 2. Strong signals: names and download source.
         RecordByNameRule(),
         CourseRule(),

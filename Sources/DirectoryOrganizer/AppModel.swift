@@ -173,6 +173,10 @@ final class AppModel {
     /// Results of the last Organize Now run, per file version. Quick scans reuse them, so
     /// the model's answers stay until the file changes or leaves the folder.
     private var deepResults: [FileIdentity: ProposedAction] = [:]
+    /// Folders Organize Now unpacked (by path), with the moves planned for what's inside.
+    /// Quick scans only see the folder, so they show these instead while they still apply.
+    private var deepUnpacked: [String: [ProposedAction]] = [:]
+    private var retryTask: Task<Void, Never>?
     private var organizeTask: Task<Void, Never>?
     private var watcher: FolderWatcher?
     private var scanRequested = false
@@ -248,9 +252,16 @@ final class AppModel {
         // Where Organize Now already analysed a file (and it hasn't changed), its result wins.
         let present = Set(plan.actions.map(FileIdentity.init) + plan.waiting.map(\.identity))
         deepResults = deepResults.filter { present.contains($0.key) }
+        let waitingPaths = Set(plan.waiting.map(\.source.path))
+        deepUnpacked = deepUnpacked.filter { waitingPaths.contains($0.key) }
+        // An unpacked folder: its contents' moves, for the items still there unchanged.
+        let fromUnpacked = plan.waiting.flatMap { item in
+            (deepUnpacked[item.source.path] ?? []).filter { FileIdentity.current($0.source) == FileIdentity($0) }
+        }
         let allActions = plan.actions.map { deepResults[FileIdentity($0)] ?? $0 }
             + plan.waiting.compactMap { deepResults[$0.identity] }
-        waiting = plan.waiting.filter { deepResults[$0.identity] == nil }
+            + fromUnpacked
+        waiting = plan.waiting.filter { deepResults[$0.identity] == nil && deepUnpacked[$0.source.path] == nil }
 
         let rejectedIDs = Set(settings.rejected)
         pending = allActions.filter { !rejectedIDs.contains(FileIdentity($0)) }
@@ -261,6 +272,7 @@ final class AppModel {
             settings.rejected.removeAll { !current.contains($0) }
         }
         skipped = plan.skipped
+        scheduleRetry(plan.skipped.compactMap(\.retryAfter).min())
         selection = selection.intersection(Set(pending.map(\.id)))
         folderOptions = FolderCatalog.options(homeRoot: homeURL, config: planner.config)
         lastScan = Date()
@@ -277,6 +289,18 @@ final class AppModel {
         if scanRequested {
             scanRequested = false
             await scan()
+        }
+    }
+
+    /// A folder was still changing: look again once it should have settled. (Nothing else
+    /// would trigger a scan, since the watcher only reports changes.)
+    private func scheduleRetry(_ seconds: TimeInterval?) {
+        retryTask?.cancel()
+        guard let seconds else { return }
+        retryTask = Task {
+            try? await Task.sleep(for: .seconds(seconds + 1))
+            guard !Task.isCancelled else { return }
+            requestScan()
         }
     }
 
@@ -312,6 +336,11 @@ final class AppModel {
                 Task { @MainActor in AppModel.shared.organizing?.progress = progress }
             }
             deepResults = Dictionary(plan.actions.map { (FileIdentity($0), $0) }, uniquingKeysWith: { $1 })
+            // Only the outermost unpacked folders show up in quick scans.
+            let outermost = plan.unpacked.filter { $0.deletingLastPathComponent().standardizedFileURL == folder.standardizedFileURL }
+            deepUnpacked = Dictionary(outermost.map { unpacked in
+                (unpacked.path, plan.actions.filter { $0.source.path.hasPrefix(unpacked.path + "/") })
+            }, uniquingKeysWith: { $1 })
             let summary = FullRunSummary(
                 date: Date(), duration: Date().timeIntervalSince(started), files: plan.actions.count,
                 byRules: plan.actions.filter { if case .rule = $0.decidedBy { true } else { false } }.count,
@@ -534,6 +563,7 @@ final class AppModel {
         settings.autoApply.enabled = []
         settings.rejected = []
         deepResults = [:]
+        deepUnpacked = [:]
         log(.info, "Switched to your real folders: only files downloaded from now on are organized")
         setFolders(watched: URL(filePath: real.watchedFolder), home: URL(filePath: real.homeRoot))
     }
@@ -546,6 +576,7 @@ final class AppModel {
         settings.realUseSince = nil
         settings.rejected = []
         deepResults = [:]
+        deepUnpacked = [:]
         log(.info, "Switched back to the sandbox")
         setFolders(watched: URL(filePath: sandbox.watchedFolder), home: URL(filePath: sandbox.homeRoot))
     }

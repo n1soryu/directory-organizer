@@ -20,7 +20,12 @@ public enum FactSummary {
             if let camera = image.cameraModel { lines.append("Camera: \(camera)") }
         }
         if facts.isScreenshot { lines.append("This is a screenshot.") }
-        if let entries = facts.archiveEntries, !entries.isEmpty {
+        if let contents = facts.folder {
+            lines.append("Folder with \(contents.fileCount) file\(contents.fileCount == 1 ? "" : "s") in \(contents.folderCount) subfolder\(contents.folderCount == 1 ? "" : "s")\(contents.truncated ? " (or more)" : "")")
+            let kinds = contents.kinds.sorted { $0.value > $1.value }.map { "\($0.value) \($0.key)" }
+            if !kinds.isEmpty { lines.append("File types: \(kinds.joined(separator: ", "))") }
+            if !contents.sample.isEmpty { lines.append("Inside: \(contents.sample.prefix(25).joined(separator: ", "))") }
+        } else if let entries = facts.archiveEntries, !entries.isEmpty {
             lines.append("Contains: \(entries.prefix(15).joined(separator: ", "))")
         }
         if let text = facts.text, !text.isEmpty, textLimit > 0 {

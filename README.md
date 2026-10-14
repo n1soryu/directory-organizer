@@ -19,6 +19,8 @@ the rest. **Nothing moves until you approve it, and every move can be undone.**
 - **Organize Now** (menu bar button) does the heavy work on demand: text recognition for images and
   scans, and Apple's on-device model for files no rule fits and for unclear names. It can propose
   new category folders ("Manuals", "Bills").
+- **Folders too:** a downloaded folder is checked all the way down; the model decides whether it's
+  one thing to keep together or a bag of files to unpack and sort one by one.
 - **Safety first, in code, not left to the model:** never deletes, never overwrites (dated names
   instead), duplicates by content hash only, password exports / recovery phrases / private keys
   detected and reported, every model answer checked against the folders that exist.

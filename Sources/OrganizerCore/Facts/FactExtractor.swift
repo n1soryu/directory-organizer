@@ -21,8 +21,11 @@ public struct FactExtractor: Sendable {
         ]
         let values = try? url.resourceValues(forKeys: keys)
         let isDirectory = values?.isDirectory ?? false
-        let ext = url.pathExtension.lowercased()
-        let baseName = url.deletingPathExtension().lastPathComponent
+        // A plain folder has no extension: "Dune.Part.Two.2024.1080p.WEB-DL" is all name.
+        // Bundles (.app, .rtfd) do, and are recognized by it.
+        let isPlainFolder = isDirectory && values?.isPackage != true
+        let ext = isPlainFolder ? "" : url.pathExtension.lowercased()
+        let baseName = isPlainFolder ? url.lastPathComponent : url.deletingPathExtension().lastPathComponent
 
         var facts = FileFacts(
             url: url,
@@ -74,6 +77,7 @@ public struct FactExtractor: Sendable {
             }
         case .folder:
             facts.archiveEntries = (try? FileManager.default.contentsOfDirectory(atPath: url.path))?.sorted()
+            await readFolder(into: &facts)
         default:
             break
         }
@@ -84,6 +88,34 @@ public struct FactExtractor: Sendable {
             facts.setText(text, source: .content)
         }
         return facts
+    }
+
+    /// Files inside a folder that get the full safety check. A folder with more is kept
+    /// together and never unpacked (see `Planner`), and its contents count as unchecked.
+    public static let maxFolderFilesChecked = 300
+
+    /// A folder: what's inside, and the same safety checks as a file in Downloads gets, for
+    /// every file inside. Size and modification date become the whole tree's, so a folder
+    /// that changes anywhere inside counts as changed.
+    private func readFolder(into facts: inout FileFacts) async {
+        var (contents, files) = FolderScan.scan(facts.url)
+        let base = facts.url.standardizedFileURL.path + "/"
+        for file in files.prefix(Self.maxFolderFilesChecked) {
+            let inner = await self.facts(for: file)
+            let relative = String(file.standardizedFileURL.path.dropFirst(base.count))
+            if let finding = SensitiveDetector.check(inner) {
+                contents.sensitive.append("\(relative): \(finding.detail)")
+            }
+            if inner.needsDeepRead { contents.needsDeepRead = true }
+        }
+        if files.count > Self.maxFolderFilesChecked {
+            contents.truncated = true
+            facts.notes.append("Only the first \(Self.maxFolderFilesChecked) of \(files.count) files inside were checked")
+        }
+        facts.size = contents.totalSize
+        facts.modified = contents.newestChange ?? facts.modified
+        facts.needsDeepRead = contents.needsDeepRead
+        facts.folder = contents
     }
 
     private func readPDF(into facts: inout FileFacts, limit: Int) async {

@@ -77,6 +77,7 @@ private final class Builder {
         try sensitive()
         try installersAndCode()
         try leftovers()
+        try folders()
     }
 
     // MARK: University
@@ -261,7 +262,62 @@ private final class Builder {
         ], to: homework)
         expect("download.pdf", "Documents/University/ECO372")
 
-        // Still downloading: must be skipped.
+        // Still downloading: must be skipped (and the folders below are made after it).
         try Data(repeating: 0, count: 100).write(to: file("bigfile.zip.crdownload"))
+    }
+
+    // MARK: Folders (whole trees; without a model they stay together)
+
+    func folders() throws {
+        let fm = FileManager.default
+        func write(_ text: String, _ path: String) throws {
+            let url = file(path)
+            try fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try text.write(to: url, atomically: true, encoding: .utf8)
+        }
+
+        // An unzipped GitHub download: a code project, kept whole and parked in review.
+        try write("{\"name\": \"todo-app\", \"version\": \"1.0.0\"}\n", "todo-app-main/package.json")
+        try write("console.log('hello')\n", "todo-app-main/src/index.js")
+        expect("todo-app-main", config.reviewFolder)
+
+        // A recovery phrase two levels down: the folder is flagged and stays whole in review.
+        var generator = SystemRandomNumberGenerator()
+        let words = (0..<12).map { _ in BIP39.orderedWords.randomElement(using: &generator)! }
+        try write(words.joined(separator: " ") + "\n", "Old phone backup/notes/seed.txt")
+        try write("Shopping: rice, lentils\n", "Old phone backup/notes/list.txt")
+        expect("Old phone backup", config.reviewFolder, alerts: [.sensitive])
+
+        try fm.createDirectory(at: file("New Folder"), withIntermediateDirectories: true)
+        expect("New Folder", config.reviewFolder)
+
+        // Unrelated things in one folder: the model should unpack this one.
+        try fm.createDirectory(at: file("Misc downloads"), withIntermediateDirectories: true)
+        try Drawing.textPDF(pages: [
+            "Dhaka WASA\nWater Bill, September 2026\n\nAccount No: 99887766\nAmount payable: BDT 640\nDue date: 25 October 2026",
+        ], to: file("Misc downloads/wasa_bill.pdf"))
+        try Drawing.textPDF(pages: [
+            "Philips HD9252 Airfryer\nUser Manual\n\nImportant safety information\nBefore first use\nUsing the appliance",
+        ], title: "Airfryer User Manual", to: file("Misc downloads/HD9252_manual.pdf"))
+        try "Lab 3 notes: bring calculator\n".write(to: file("Misc downloads/reminder.txt"), atomically: true, encoding: .utf8)
+        expect("Misc downloads", config.reviewFolder)
+
+        // A film with its extras: one thing.
+        let film = "Dune.Part.Two.2024.1080p.WEB-DL"
+        try fm.createDirectory(at: file(film), withIntermediateDirectories: true)
+        try Data("fake video \(film)".utf8).write(to: file("\(film)/\(film).mp4"))
+        try write("1\n00:00:01,000 --> 00:00:04,000\nThe spice must flow.\n", "\(film)/\(film).en.srt")
+        try write("Release notes\n", "\(film)/\(film).nfo")
+        expect(film, config.reviewFolder)
+
+        // Downloaded a while ago, so none of them counts as still being written.
+        let past = Date().addingTimeInterval(-600)
+        for name in ["todo-app-main", "Old phone backup", "New Folder", "Misc downloads", film] {
+            let top = file(name)
+            let inside = fm.enumerator(at: top, includingPropertiesForKeys: nil)?.compactMap { $0 as? URL } ?? []
+            for url in inside.reversed() + [top] {
+                try fm.setAttributes([.modificationDate: past], ofItemAtPath: url.path)
+            }
+        }
     }
 }

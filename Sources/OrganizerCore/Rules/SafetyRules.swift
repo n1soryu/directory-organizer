@@ -6,6 +6,17 @@ struct SensitiveFileRule: Rule {
     let name = "sensitive file"
 
     func evaluate(_ facts: FileFacts, config: OrganizerConfig) -> Decision? {
+        // A folder with something sensitive inside stays whole and waits in review: never
+        // unpacked, never filed by the model.
+        if let found = facts.folder?.sensitive, !found.isEmpty {
+            return Decision(
+                destination: config.reviewFolder,
+                confidence: 1,
+                reason: "Folder contains \(found.count) sensitive file\(found.count == 1 ? "" : "s"): \(found.prefix(3).joined(separator: "; "))",
+                source: .safety(name),
+                alerts: found.map { Alert(.sensitive, "Inside \(facts.name): \($0)") }
+            )
+        }
         guard let finding = SensitiveDetector.check(facts) else { return nil }
 
         let label: String = switch finding.kind {
@@ -84,5 +95,17 @@ struct CodeProjectRule: Rule {
             reason: "Code project (contains \(marker)): unpack it into ~/Developer yourself",
             source: .rule(name)
         )
+    }
+}
+
+/// An empty folder (often what's left after unpacking one). The app never deletes, so it
+/// waits in review for you to throw away.
+struct EmptyFolderRule: Rule {
+    let name = "empty folder"
+
+    func evaluate(_ facts: FileFacts, config: OrganizerConfig) -> Decision? {
+        guard facts.isDirectory, facts.folder?.isEmpty == true else { return nil }
+        return Decision(destination: config.reviewFolder, confidence: 1,
+                        reason: "Empty folder: nothing to keep", source: .rule(name))
     }
 }

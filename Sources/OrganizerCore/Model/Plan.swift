@@ -32,6 +32,14 @@ public struct ProposedAction: Codable, Sendable, Identifiable {
 public struct SkippedItem: Codable, Sendable {
     public var name: String
     public var reason: String
+    /// Worth another look after this many seconds (a folder still being written), or nil.
+    public var retryAfter: TimeInterval?
+
+    public init(name: String, reason: String, retryAfter: TimeInterval? = nil) {
+        self.name = name
+        self.reason = reason
+        self.retryAfter = retryAfter
+    }
 }
 
 /// A file a quick scan couldn't decide: it needs text recognition or the model (Organize Now).
@@ -51,6 +59,9 @@ public struct Plan: Codable, Sendable {
     public var skipped: [SkippedItem]
     /// Quick scans only: files left for a full run.
     public var waiting: [WaitingItem] = []
+    /// Folders the model unpacked: their contents are planned item by item (and appear in
+    /// `actions` with sources inside these folders).
+    public var unpacked: [URL] = []
 
     public var alerts: [(action: ProposedAction, alert: Alert)] {
         actions.flatMap { action in action.alerts.map { (action, $0) } }

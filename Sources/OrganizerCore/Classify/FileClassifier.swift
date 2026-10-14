@@ -33,6 +33,23 @@ public struct ClassifierSuggestion: Codable, Sendable {
     }
 }
 
+/// Whether a downloaded folder is one thing (a project, an album, a course pack) or just a
+/// container of separate files that each belong somewhere else.
+public struct UnpackSuggestion: Codable, Sendable {
+    public var unpack: Bool
+    /// What the folder is, in a few words ("photo album", "mixed downloads").
+    public var kind: String
+    public var confidence: Double
+    public var reason: String
+
+    public init(unpack: Bool, kind: String = "", confidence: Double, reason: String) {
+        self.unpack = unpack
+        self.kind = kind
+        self.confidence = confidence
+        self.reason = reason
+    }
+}
+
 /// A suggested name for a file whose own name says nothing ("IMG_4821", "download").
 public struct NameSuggestion: Codable, Sendable {
     /// A few words describing the file, without extension or date ("Router login page").
@@ -65,6 +82,15 @@ public protocol FileClassifier: Sendable {
     var name: String { get }
     func suggest(_ request: ClassificationRequest) async throws -> ClassifierSuggestion
     func suggestName(for facts: FileFacts) async throws -> NameSuggestion
+    /// Keep a downloaded folder together, or unpack it so each item inside is placed on its own?
+    func suggestUnpack(for facts: FileFacts) async throws -> UnpackSuggestion
+}
+
+extension FileClassifier {
+    /// Without a model a folder is never unpacked: it stays together.
+    public func suggestUnpack(for facts: FileFacts) async throws -> UnpackSuggestion {
+        throw ClassifierError.unavailable("no model in use")
+    }
 }
 
 /// No model: leftovers go to review. Used by tests and `--no-model`.

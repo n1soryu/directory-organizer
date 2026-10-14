@@ -44,10 +44,15 @@ public struct Applier: Sendable {
         //    URL.resourceValues can return values cached while planning.)
         var fresh = source
         fresh.removeAllCachedResourceValues()
-        guard let values = try? fresh.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey]) else {
+        guard let values = try? fresh.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey, .isDirectoryKey]) else {
             return ApplyResult(action: action, outcome: .skipped(MoveError.sourceMissing(source.path).description))
         }
-        if Int64(values.fileSize ?? 0) != action.sourceSize || values.contentModificationDate != action.sourceModified {
+        // A folder counts as changed if anything inside it changed (the same tree-wide size
+        // and newest change the plan recorded), so a half-unzipped folder isn't moved.
+        let (size, modified) = values.isDirectory == true
+            ? FolderScan.fingerprint(fresh)
+            : (Int64(values.fileSize ?? 0), values.contentModificationDate)
+        if size != action.sourceSize || modified != action.sourceModified {
             return ApplyResult(action: action, outcome: .skipped(MoveError.sourceChanged(action.originalName).description))
         }
 

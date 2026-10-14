@@ -30,8 +30,11 @@ public struct FileFacts: Codable, Sendable {
 
     public var media: MediaInfo?
     public var image: ImageInfo?
-    /// Paths inside a zip archive (first few hundred), used to spot code projects.
+    /// Paths inside a zip archive (first few hundred), or the names at the top of a folder
+    /// (hidden ones included, like .git): used to spot code projects.
     public var archiveEntries: [String]?
+    /// Folders only: what's inside, all the way down.
+    public var folder: FolderContents?
 
     public var isScreenshot: Bool
     /// The name says nothing useful ("document (3)", "IMG_4821", a hash...).

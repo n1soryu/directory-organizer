@@ -142,6 +142,42 @@ public struct AppleClassifier: FileClassifier {
         return NameSuggestion(title: title, confidence: Self.confidenceLevels[level] ?? 0.4)
     }
 
+    // MARK: - Keep this folder together, or unpack it?
+
+    public func suggestUnpack(for facts: FileFacts) async throws -> UnpackSuggestion {
+        if let reason = Self.unavailableReason() { throw ClassifierError.unavailable(reason) }
+
+        // Describe first, then decide: the description steers the answer.
+        let schema = try GenerationSchema(root: DynamicGenerationSchema(name: "FolderDecision", properties: [
+            .init(name: "kind", description: "What this folder is, in 2-5 words (e.g. photo album, film with subtitles, course pack, mixed downloads)",
+                  schema: .init(type: String.self)),
+            .init(name: "belongsTogether", description: "Do the items only make sense together, as one thing?",
+                  schema: .init(name: "Together", anyOf: ["yes", "no"])),
+            .init(name: "reason", description: "One sentence explaining the choice",
+                  schema: .init(type: String.self)),
+            .init(name: "confidence", description: "How sure you are",
+                  schema: .init(name: "Confidence", anyOf: ["high", "medium", "low"])),
+        ]), dependencies: [])
+        let instructions = """
+            You organize downloaded folders on a Mac. Decide whether a folder is one thing that must stay \
+            together, or just a container of separate items that each belong in a different place.
+            Keep together when the parts depend on each other or form one collection: a software project, \
+            a website, an album or photo set from one event, a course pack, a game, a document with its attachments.
+            Unpack when the items are unrelated or of different kinds, so each one can be filed on its own: \
+            a folder of assorted downloads, a mix of bills, manuals and pictures, a film with only extras around it.
+            When in doubt, keep it together.
+            """
+        let content = try await respond(instructions: instructions, schema: schema) { limit in
+            Prompt { FactSummary.describe(facts, textLimit: min(limit, 500)) }
+        }
+        let together: String = (try? content.value(forProperty: "belongsTogether")) ?? "yes"
+        let kind: String = (try? content.value(forProperty: "kind")) ?? ""
+        let reason: String = (try? content.value(forProperty: "reason")) ?? ""
+        let level: String = (try? content.value(forProperty: "confidence")) ?? "low"
+        return UnpackSuggestion(unpack: together == "no", kind: kind,
+                                confidence: Self.confidenceLevels[level] ?? 0.4, reason: reason)
+    }
+
     // MARK: - Shared
 
     /// One fresh session per question, so files don't influence each other. Greedy sampling

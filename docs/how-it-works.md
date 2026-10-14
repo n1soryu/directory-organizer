@@ -25,6 +25,14 @@ A wrong guess sends the file to the review folder; it is never lost.
 | 5 | Organize Now: the heavy work (text recognition + model) on demand from the menu bar | ✅ |
 | 6 | Evaluation on a labeled test set: rules only vs rules + model | |
 
+**Next (approved 2026-10-14):** a model-led app with few rules, in phases:
+1. Folders in Downloads: read inside, safety-checked, left alone while changing, unpacked when the model says so ✅ (0.7.0-dev)
+2. Folder profiles learned from your own folders (replacing the fixed folder list and personal prompt)
+3. Grouping: code groups similar files, the model decides per group; new folders only for groups of 2–3+
+4. Evaluation harness (the old Milestone 6), before any autonomy
+5. Only universal rules left (safety, installers, code projects, incomplete downloads); NSU/FSAE/course rules removed
+6. Earned autonomy: per-folder trust from your approvals; undo and corrections lower it
+
 ## Try it
 
 Needs macOS 27 and Swift 6 (the Command Line Tools are enough; Xcode isn't required). One quirk:
@@ -147,6 +155,26 @@ Swift then checks every answer:
   note removed, and folders the move created removed again (only if empty; `rmdir` refuses
   otherwise). If the original name has been taken since, the file comes back with the date
   added rather than overwriting.
+
+## Folders in Downloads
+
+A downloaded folder is read all the way down (up to 6 levels and 2,000 items; hidden items and
+bundle contents skipped): file count, kinds, total size, a sample of paths, and the newest change
+anywhere inside.
+
+- **Safety inside:** every file inside (up to 300) gets the same checks as a file in Downloads. A
+  folder with a password export, key or recovery phrase anywhere inside goes to review whole, with
+  an alert per file, and is never unpacked.
+- **Still changing?** A folder that changed in the last 30 s is skipped ("still being unzipped or
+  copied?") and the app looks again once it should have settled. When moving, the folder's
+  size and date are the whole tree's, so a change anywhere inside since planning skips the move.
+- **Rules first:** code projects (`.git`, `package.json`, `Package.swift`…) and empty folders go to
+  review whole.
+- **Keep together or unpack (Organize Now):** for other folders the model is asked whether the items
+  belong together (a project, an album, a course pack) or are separate things. Unpacked folders
+  are replaced in the plan by what's inside (2 levels at most, 200 files at most), each item
+  placed on its own; the emptied folder later goes to review. Without the model nothing is unpacked.
+- A plain folder has no extension: `Dune.Part.Two.2024.1080p.WEB-DL` is all name.
 
 ## Quick scans and Organize Now
 

@@ -18,6 +18,25 @@ public struct FileIdentity: Codable, Hashable, Sendable {
         size = facts.size
         modified = facts.modified
     }
+
+    /// The item at `url` as it is on disk now (a folder by its whole tree), or nil if it's gone.
+    public static func current(_ url: URL) -> FileIdentity? {
+        var fresh = url
+        fresh.removeAllCachedResourceValues()
+        guard let values = try? fresh.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey, .isDirectoryKey])
+        else { return nil }
+        if values.isDirectory == true {
+            let (size, modified) = FolderScan.fingerprint(fresh)
+            return FileIdentity(path: url.path, size: size, modified: modified)
+        }
+        return FileIdentity(path: url.path, size: Int64(values.fileSize ?? 0), modified: values.contentModificationDate)
+    }
+
+    public init(path: String, size: Int64, modified: Date?) {
+        self.path = path
+        self.size = size
+        self.modified = modified
+    }
 }
 
 /// Which kinds of rule decisions may be applied without asking. Off by default. Only
