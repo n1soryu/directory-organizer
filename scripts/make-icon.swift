@@ -154,10 +154,18 @@ for base in [16, 32, 128, 256, 512] {
         sips.arguments = ["-z", "\(pixels)", "\(pixels)", master.path, "--out", iconset.appending(path: name).path]
         sips.standardOutput = FileHandle.nullDevice
         try sips.run(); sips.waitUntilExit()
+        guard sips.terminationStatus == 0 else {
+            FileHandle.standardError.write(Data("sips failed for \(name)\n".utf8))
+            exit(1)
+        }
     }
 }
 let iconutil = Process()
 iconutil.executableURL = URL(filePath: "/usr/bin/iconutil")
 iconutil.arguments = ["-c", "icns", iconset.path, "-o", root.appending(path: "Resources/AppIcon.icns").path]
 try iconutil.run(); iconutil.waitUntilExit()
-print(iconutil.terminationStatus == 0 ? "Wrote Resources/AppIcon.icns and Resources/Icon/AppIcon-1024.png" : "iconutil failed")
+guard iconutil.terminationStatus == 0 else {
+    FileHandle.standardError.write(Data("iconutil failed\n".utf8))
+    exit(1)
+}
+print("Wrote Resources/AppIcon.icns and Resources/Icon/AppIcon-1024.png")

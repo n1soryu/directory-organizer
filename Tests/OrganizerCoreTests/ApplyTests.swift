@@ -155,9 +155,11 @@ import TestDataKit
         defer { cleanUp() }
         let action = try #require(plan.actions.first { $0.originalName == "notes.txt" })
         let destination = home.appending(path: action.destinationPath)
-        // Simulate a crash: the intent was logged and the file moved, but "done" never got written.
+        // Simulate a crash: the intent was logged (with the hash, as the applier logs it) and the
+        // file moved, but "done" never got written.
         try journal.append(JournalEntry(event: .movePending, time: Date(), moveID: UUID(), batchID: UUID(),
-                                        from: action.source.path, to: destination.path))
+                                        from: action.source.path, to: destination.path,
+                                        sha256: try FileHash.sha256(action.source)))
         try FileManager.default.moveItem(at: action.source, to: destination)
         #expect(try journal.records().first?.state == .pending)
 
@@ -206,5 +208,80 @@ import TestDataKit
             }
         }
         return result
+    }
+}
+
+/// MED-34, MED-35, MED-40: undo's refusals and notes, the new-folder cap, big files.
+@Suite(.serialized) struct UndoEdgeTests {
+    let root = FileManager.default.temporaryDirectory.appending(path: "file-organizer-undo-\(UUID().uuidString)")
+    var journal: MoveJournal { MoveJournal(url: root.appending(path: "moves.jsonl")) }
+    var home: URL { root.appending(path: "Home") }
+
+    /// Moves one new file into Documents/Notes and returns where it went.
+    func moveOne(maxHashedSize: Int64 = 1 << 30) throws -> URL {
+        let downloads = root.appending(path: "Downloads")
+        try FileManager.default.createDirectory(at: downloads, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: home.appending(path: "Documents"), withIntermediateDirectories: true)
+        let source = downloads.appending(path: "a.txt")
+        try Data("original".utf8).write(to: source)
+        let values = try source.resourceValues(forKeys: [.contentModificationDateKey])
+        let action = ProposedAction(source: source, originalName: "a.txt", sourceSize: 8, sourceModified: values.contentModificationDate,
+                                    destinationFolder: "Documents/Notes", finalName: "a.txt", tags: [], confidence: 1,
+                                    reason: "", decidedBy: .rule("test"), alerts: [], createsFolders: ["Documents/Notes"])
+        var applier = Applier(homeRoot: home, journal: journal)
+        applier.maxHashedSize = maxHashedSize
+        #expect(applier.apply([action]).first?.outcome == .moved)
+        return home.appending(path: "Documents/Notes/a.txt")
+    }
+
+    @Test func aFileThatsGoneCantBeUndone() throws {
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.removeItem(at: try moveOne())
+        let undoer = Undoer(journal: journal)
+        #expect(undoer.undo(try undoer.undoable()).first?.error?.contains("no longer at") == true)
+    }
+
+    @Test func anEditedFileGoesBackWithANote() throws {
+        defer { try? FileManager.default.removeItem(at: root) }
+        let moved = try moveOne()
+        let handle = try FileHandle(forWritingTo: moved)   // edit in place: our origin note stays
+        try handle.seekToEnd(); try handle.write(contentsOf: Data(" and edited".utf8)); try handle.close()
+        let undoer = Undoer(journal: journal)
+        let result = try #require(undoer.undo(try undoer.undoable()).first)
+        #expect(result.restoredTo != nil)
+        #expect(result.notes.contains { $0.contains("edited") })
+    }
+
+    @Test func aDifferentFileInItsPlaceIsNotPutBack() throws {
+        defer { try? FileManager.default.removeItem(at: root) }
+        let moved = try moveOne()
+        try FileManager.default.removeItem(at: moved)
+        try Data("someone else's file".utf8).write(to: moved)
+        let undoer = Undoer(journal: journal)
+        let result = try #require(undoer.undo(try undoer.undoable()).first)
+        #expect(result.restoredTo == nil)
+        #expect(result.error?.contains("isn't the file that was moved") == true)
+        #expect(FileManager.default.fileExists(atPath: moved.path))
+    }
+
+    @Test func bigFilesAreLoggedWithoutAHashAndStillUndone() throws {
+        defer { try? FileManager.default.removeItem(at: root) }
+        _ = try moveOne(maxHashedSize: 1)
+        let record = try #require(try journal.records().first)
+        #expect(record.sha256 == nil)
+        let undoer = Undoer(journal: journal)
+        #expect(undoer.undo([record]).first?.restoredTo != nil)    // recognised by our origin note
+    }
+
+    @Test func tooManyNewFoldersGoesToReview() async throws {
+        defer { try? FileManager.default.removeItem(at: root) }
+        let downloads = root.appending(path: "Downloads")
+        try FileManager.default.createDirectory(at: downloads, withIntermediateDirectories: true)
+        try Data("episode".utf8).write(to: downloads.appending(path: "Show.S01E01.mkv"))
+        var planner = Planner(homeRoot: home)
+        planner.config.maxNewFolders = 1                    // Movies, TV Shows, Show: 3 needed
+        let action = try #require(try await planner.plan(folder: downloads).actions.first)
+        #expect(action.destinationFolder == planner.config.reviewFolder)
+        #expect(action.reason.hasPrefix("Too many new folders"))
     }
 }

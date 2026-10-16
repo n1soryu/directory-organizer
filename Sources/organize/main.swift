@@ -43,14 +43,8 @@ func path(_ string: String) -> URL {
 
 /// Until you say otherwise, never read your real Downloads or file into your real home folder.
 func refuseRealFolders(_ urls: URL...) {
-    let realHome = FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL.path
-    let protected = [realHome] + ["Downloads", "Documents", "Desktop", "Pictures", "Movies", "Music"]
-        .map { realHome + "/" + $0 }
-    for url in urls {
-        let p = url.resolvingSymlinksInPath().path
-        if protected.contains(where: { p == $0 || ($0 != realHome && p.hasPrefix($0 + "/")) }) {
-            fail("\(p) is one of your real folders. For now this only runs on the sandbox (TestData).")
-        }
+    for url in urls where FolderAccess.isRealUserFolder(url) {
+        fail("\(url.path) is one of your real folders. This tool only runs on the sandbox (TestData).")
     }
 }
 

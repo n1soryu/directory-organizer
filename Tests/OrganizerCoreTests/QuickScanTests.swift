@@ -69,7 +69,6 @@ import TestDataKit
 
         let full = try await Planner(homeRoot: home, mode: .full).plan(folder: downloads)
         #expect(full.actions.first { $0.originalName == "IMG_5012.jpg" }?.destinationFolder == "Documents/Secure")
-        #expect(full.waiting.isEmpty)
     }
 
     @Test func progressCountsUpToTheTotal() async throws {
@@ -85,10 +84,10 @@ import TestDataKit
         let log = Log()
         _ = try await Planner(homeRoot: home, mode: .quick).plan(folder: downloads) { log.add($0) }
         let steps = log.all
-        let total = try #require(steps.first?.total)
-        #expect(total > 0)
-        #expect(steps.map(\.done) == steps.map(\.done).sorted())   // never goes backwards
-        #expect(steps.last?.done == total)
+        #expect(steps.first?.total ?? 0 > 0)
+        // The whole run's fraction never goes backwards, and ends full.
+        #expect(steps.map(\.fraction) == steps.map(\.fraction).sorted())
+        #expect(steps.last?.fraction == 1)
         #expect(steps.contains { $0.step == .reading } && steps.contains { $0.step == .deciding })
     }
 

@@ -14,6 +14,22 @@ public enum ExtendedAttributes {
         }
     }
 
+    /// Like `data`, but nil only when the attribute isn't there; other failures throw.
+    public static func dataChecked(_ name: String, at url: URL) throws -> Data? {
+        try url.withUnsafeFileSystemRepresentation { path -> Data? in
+            guard let path else { throw CocoaError(.fileReadInvalidFileName, userInfo: [NSFilePathErrorKey: url.path]) }
+            let size = getxattr(path, name, nil, 0, 0, XATTR_NOFOLLOW)
+            if size < 0 {
+                if errno == ENOATTR { return nil }
+                throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+            }
+            var data = Data(count: size)
+            let read = data.withUnsafeMutableBytes { getxattr(path, name, $0.baseAddress, size, 0, XATTR_NOFOLLOW) }
+            guard read == size else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+            return data
+        }
+    }
+
     public static func set(_ data: Data, name: String, at url: URL) throws {
         let result = url.withUnsafeFileSystemRepresentation { path -> Int32 in
             guard let path else { return -1 }

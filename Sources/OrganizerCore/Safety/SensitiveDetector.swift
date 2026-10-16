@@ -25,6 +25,9 @@ public enum SensitiveDetector {
     public static func check(_ facts: FileFacts) -> SensitiveFinding? {
         if let finding = byExtension(facts) { return finding }
         if let finding = facts.sensitive { return finding }
+        if facts.kind == .archive, let inside = sensitiveEntry(facts.archiveEntries ?? []) {
+            return SensitiveFinding(kind: .credentialFile, detail: "archive contains \(inside)")
+        }
         guard let text = facts.text, !text.isEmpty else { return nil }
 
         if let key = privateKey(in: text) {
@@ -52,6 +55,20 @@ public enum SensitiveDetector {
             return SensitiveFinding(kind: .credentialFile, detail: what)
         }
         return nil
+    }
+
+    /// A key, password database or credentials file inside an archive, judged by its name (the
+    /// archive isn't unpacked to look).
+    static func sensitiveEntry(_ entries: [String]) -> String? {
+        let names: Set<String> = ["id_rsa", "id_dsa", "id_ecdsa", "id_ed25519", ".netrc", ".git-credentials", ".pgpass", "wallet.dat"]
+        let extensions: Set<String> = ["p12", "pfx", "ppk", "kdbx", "1pux", "1pif", "ovpn", "keychain-db"]
+        return entries.first { path in
+            let name = (path as NSString).lastPathComponent.lowercased()
+            let ext = (name as NSString).pathExtension
+            return names.contains(name) || extensions.contains(ext)
+                || (name == ".env" || (name.hasPrefix(".env.") && !["example", "sample", "template", "dist"].contains { name.hasSuffix($0) }))
+                || (name == "credentials" && path.lowercased().contains(".aws/"))
+        }
     }
 
     /// Developer credential files, the kind found in downloaded projects and backups: what

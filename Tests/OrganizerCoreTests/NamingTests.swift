@@ -53,7 +53,7 @@ import Testing
         #expect(FileNames.sanitize("a/b:c") == "a-b-c")
         #expect(FileNames.sanitize("..hidden") == "hidden")
         #expect(FileNames.sanitize("  spaced   out  ") == "spaced out")
-        #expect(FileNames.sanitize("line\nbreak") == "linebreak")
+        #expect(FileNames.sanitize("line\nbreak") == "line break")      // a line break separates words
         #expect(FileNames.sanitize(String(repeating: "x", count: 200)).count == FileNames.maxBaseLength)
     }
 
@@ -70,5 +70,26 @@ import Testing
         // A name that already carries the date just gets a counter.
         #expect(FileNames.clashAlternatives("2026-10-13 Grade History", "pdf", date: date).first
                 == "2026-10-13 Grade History 2.pdf")
+    }
+}
+
+/// MED-27, MED-28, MED-31, LOW-13/14/15: names the filesystem and Finder will accept as meant.
+@Suite struct NameSafetyTests {
+    @Test func longNamesFitTheFilesystem() {
+        let emoji = String(repeating: "👨‍👩‍👧‍👦", count: 80)        // 80 characters, 25 bytes each
+        #expect(FileNames.sanitize(emoji).utf8.count <= FileNames.maxBaseBytes)
+        let dotted = String(repeating: "a", count: 79) + ".b"
+        #expect(!FileNames.sanitize(dotted).hasSuffix("."))
+    }
+
+    @Test func invisibleAndControlCharacters() {
+        #expect(FileNames.sanitize("Hello\nWorld") == "Hello World")
+        #expect(FileNames.sanitize("invoice\u{202E}fdp.exe") == "invoicefdp.exe")
+        #expect(FileNames.sanitize("Cafe\u{301}") == FileNames.sanitize("Café"))
+    }
+
+    @Test func datesAreGregorianWhateverTheMacsCalendar() {
+        let date = Date(timeIntervalSince1970: 1_791_900_000)     // 2026-10-13
+        #expect(FileNames.day(date).hasPrefix("2026-"))
     }
 }

@@ -96,7 +96,11 @@ import Testing
         #expect(FolderAccess.isRealUserFolder(home.appending(path: "Downloads")))
         #expect(FolderAccess.isRealUserFolder(home.appending(path: "Documents/University")))
         #expect(!FolderAccess.isRealUserFolder(AppSettings.sandboxRoot.appending(path: "Downloads")))
-        #expect(!FolderAccess.isRealUserFolder(home.appending(path: "Developer")))
+        // Anything in your home outside the sandbox counts, not just a fixed list of folders.
+        #expect(FolderAccess.isRealUserFolder(home.appending(path: "Developer")))
+        #expect(FolderAccess.isRealUserFolder(home.appending(path: "Library/Application Support")))
+        #expect(!FolderAccess.isRealUserFolder(AppSettings.sandboxRoot.appending(path: "Home/Documents")))
+        #expect(!FolderAccess.isRealUserFolder(FileManager.default.temporaryDirectory))
     }
 }
 

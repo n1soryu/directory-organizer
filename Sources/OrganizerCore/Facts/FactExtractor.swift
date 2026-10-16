@@ -33,7 +33,7 @@ public struct FactExtractor: Sendable {
             name: url.lastPathComponent,
             baseName: baseName,
             fileExtension: ext,
-            kind: FileKind(fileExtension: ext, isDirectory: isDirectory),
+            kind: FileKind(fileExtension: ext, isDirectory: isDirectory, isPackage: values?.isPackage ?? false),
             isDirectory: isDirectory,
             size: Int64(values?.fileSize ?? 0),
             created: values?.creationDate,
@@ -50,6 +50,18 @@ public struct FactExtractor: Sendable {
         case .pdf:
             await readPDF(into: &facts, limit: limit)
         case .wordDocument, .spreadsheet, .presentation:
+            if ["rtf", "doc", "odt"].contains(ext) {
+                if let text = OfficeText.readOther(url) {
+                    facts.setText(String(text.prefix(limit)), source: .office)
+                } else {
+                    facts.needsDeepRead = true
+                    facts.notes.append("Couldn't read the document's text")
+                }
+            } else if !["docx", "xlsx", "pptx"].contains(ext) {
+                // .pages, .numbers, .key, .xls, .ppt, .ods, .odp: no reader for these (yet). Not
+                // marked unreadable, or every one would wait in review forever.
+                facts.notes.append("Text of .\(ext) files isn't read")
+            }
             if ["docx", "xlsx", "pptx"].contains(ext) {
                 do {
                     let office = try OfficeText.read(url, limit: limit)

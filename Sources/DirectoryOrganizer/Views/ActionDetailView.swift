@@ -58,7 +58,7 @@ struct ActionDetailView: View {
 
                 buttons
 
-                ForEach(action.alerts, id: \.self) { alert in
+                ForEach(Array(action.alerts.enumerated()), id: \.offset) { _, alert in
                     HStack(alignment: .top, spacing: 10) {
                         Image(systemName: alert.kind.systemImage)
                             .foregroundStyle(alert.kind.color)

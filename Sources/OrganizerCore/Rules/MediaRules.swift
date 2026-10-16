@@ -21,10 +21,11 @@ struct VideoRule: Rule {
                             confidence: 0.9, reason: "Film (\(why))", source: .rule(name))
         }
         if let minutes, minutes < 20 {
-            return Decision(destination: config.clips, confidence: 0.85,
+            return Decision(destination: config.clips, newBaseName: rename, confidence: 0.85,
                             reason: "Short video (\(max(minutes, 1)) min or less)", source: .rule(name))
         }
-        return Decision(destination: "Movies", confidence: 0.8, reason: "Video file", source: .rule(name))
+        return Decision(destination: config.films, newBaseName: rename, confidence: 0.8,
+                        reason: "Video file\(minutes.map { " (\($0) min)" } ?? "")", source: .rule(name))
     }
 }
 

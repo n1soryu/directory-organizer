@@ -90,7 +90,13 @@ public struct Applier: Sendable {
 
         // 4. Log the intent before touching the file (write-ahead).
         let moveID = UUID()
-        let tagsBefore = FinderTags.readRaw(source)
+        let tagsBefore: [String]
+        do {
+            tagsBefore = try FinderTags.readRawChecked(source)
+        } catch {
+            undoFolders()
+            return ApplyResult(action: action, outcome: .failed("couldn't read its Finder tags, so an undo couldn't put them back; nothing was moved"))
+        }
         let hash = action.sourceSize <= maxHashedSize ? try? FileHash.sha256(source) : nil
         var entry = JournalEntry(
             event: .movePending, time: Date(), moveID: moveID, batchID: batchID,
@@ -103,8 +109,12 @@ public struct Applier: Sendable {
             return ApplyResult(action: action, outcome: .failed("couldn't write the move log, so nothing was moved: \(error)"))
         }
 
-        // 5. Move: atomic, never overwrites.
+        // 5. Move: atomic, never overwrites. The folder is checked once more right before, in
+        //    case a link was swapped in since step 3.
         do {
+            guard folder.resolvingSymlinksInPath().path.hasPrefix(realHome + "/") else {
+                throw MoveError.outsideHome(folder.path)
+            }
             try SafeMove.move(source, to: destination)
         } catch {
             undoFolders()

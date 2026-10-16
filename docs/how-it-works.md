@@ -67,7 +67,9 @@ Music folders until real use is switched on deliberately.
 - Name, extension, size, dates (including when the file was downloaded)
 - **Download source** (`kMDItemWhereFroms`), the strongest signal: e.g. `northsouth.edu` → NSU
 - Text: PDFKit for PDFs, with **OCR for scanned PDFs** that have no text layer; the XML inside
-  .docx/.xlsx/.pptx; Vision OCR for images
+  .docx/.xlsx/.pptx; macOS's own converter for .rtf/.doc/.odt; Vision OCR for images; the first
+  256 KB of text files (UTF-8 or UTF-16) for the safety checks, of which the model sees an excerpt.
+  Not read (known limit): .pages, .numbers, .key, .xls, .ppt, .ods, .odp.
 - Video length and title from the file header (the video itself is never analyzed);
   photo date and camera from EXIF; whether an image is a screenshot
 - What's inside zip archives (to spot code projects)
@@ -75,22 +77,28 @@ Music folders until real use is switched on deliberately.
 ## Rules, in order (first match wins)
 
 1. **Sensitive files** (always first, always reported):
-   - CSV/JSON with password-manager columns → review (import it, then delete it)
-   - 12+ consecutive BIP-39 words (recovery phrases, even in a photo) → Secure
-   - private keys (`-----BEGIN … PRIVATE KEY-----`) and credential files → Secure
-2. **Installers, disk images, firmware** (.dmg .iso .pkg .bin …) → review
+   - CSV/JSON with password-manager columns (header in the first lines, any size) → review
+   - recovery phrases: 12+ BIP-39 words in a row, or 11+ among 13 (one misread), even in a photo → Secure
+   - private keys (PEM, OpenSSH, SSH2/PuTTY, any case) and credential files (`.env` with secrets,
+     `.netrc`, `.git-credentials`, `.npmrc` tokens, AWS keys; also inside zips and folders) → Secure
+   - a folder with any of these inside (hidden files included), or too big to check fully → review
+   - unreadable (locked PDF, broken document, failed text recognition) → review: unread isn't clean
+2. **Installers, disk images, firmware** (.dmg .iso .img .pkg .bin …) → review
 3. **Code projects** (zips containing Package.swift, .git, package.json …) → review
-4. **NSU records**: dated with the download date and kept side by side in
+4. **Empty folders** → review
+5. **NSU records by name**: dated with the download date and kept side by side in
    `University/Records/<type>/` (Grades, Advising, Payments, Registration, Curriculum, …),
    e.g. `2026-10-13 Grade History.pdf`
-5. **Courses**: a course code from the curriculum in the name, at the top of the text, or the
+6. **Courses**: a course code from the curriculum in the name, at the top of the text, or the
    course's full title → `University/<CODE>/`. Unknown codes go to review instead of creating folders.
-6. **FSAE** team files → `Documents/FSAE`
-7. **Videos**: films → `Movies/Films/Avengers Infinity War.mpeg`, episodes →
+7. **FSAE** team files → `Documents/FSAE`
+8. **NSU records by content** (after courses and FSAE, so course material that mentions
+   "registration" stays a course file)
+9. **Videos**: films → `Movies/Films/Avengers Infinity War.mpeg`, episodes →
    `Movies/TV Shows/<Show>/Show S01E04.mkv`, short clips → `Movies/Clips`. Release clutter
    (4K, BluRay, x265 …) is removed; a year is kept only if it was in the name.
-8. **Images** → `Pictures/Downloaded Images`
-9. Anything else → the model (below). If it's unavailable or unsure: review.
+10. **Images** → `Pictures/Downloaded Images`
+11. Anything else → the model (below). If it's unavailable or unsure: review.
 
 ## Your folders, learned (folder profiles)
 

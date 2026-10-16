@@ -34,12 +34,24 @@ public struct Planner: Sendable {
         case full
     }
 
-    /// Reported after each file, so a long run can show where it is.
+    /// Reported after each file, so a long run can show where it is. `done` and `total` count
+    /// within the step; `fraction` is the whole run's, and only ever grows.
     public struct Progress: Sendable, Equatable {
         public var done: Int
         public var total: Int
         public var file: String
         public var step: Step
+
+        /// 0...1 for the whole run: each step has its own stretch of the bar.
+        public var fraction: Double {
+            let (start, width): (Double, Double) = switch step {
+            case .reading: (0, 0.35)
+            case .learning: (0.35, 0.1)
+            case .grouping: (0.45, 0.2)
+            case .deciding: (0.65, 0.35)
+            }
+            return start + width * (total > 0 ? min(Double(done) / Double(total), 1) : 1)
+        }
 
         public enum Step: String, Sendable {
             case learning = "Learning your folders"
@@ -79,11 +91,9 @@ public struct Planner: Sendable {
             }
             return true
         }
-        // Reading and deciding are each half of the work.
-        let total = candidates.count * 2
         for (index, url) in candidates.enumerated() {
             try Task.checkCancellation()
-            progress?(Progress(done: index, total: total, file: url.lastPathComponent, step: .reading))
+            progress?(Progress(done: index, total: candidates.count, file: url.lastPathComponent, step: .reading))
             facts.append(await extractor.facts(for: url))
         }
         // Folders still being written are left until they've been quiet for a while.
@@ -99,7 +109,6 @@ public struct Planner: Sendable {
         if mode == .full {
             facts = try await unpacking(facts, depth: 0, into: &unpacked)
         }
-        let decidingTotal = candidates.count + facts.count
 
         // Oldest download first, so the first copy of a duplicate counts as the original.
         facts.sort { a, b in
@@ -124,7 +133,7 @@ public struct Planner: Sendable {
 
         for (index, item) in facts.enumerated() {
             try Task.checkCancellation()
-            progress?(Progress(done: candidates.count + index, total: decidingTotal, file: item.name, step: .deciding))
+            progress?(Progress(done: index, total: facts.count, file: item.name, step: .deciding))
             var decision: Decision
             if let original = copies[item.url] {
                 decision = Decision(
@@ -153,7 +162,7 @@ public struct Planner: Sendable {
             }
             actions.append(resolve(item, decision, &hashes, &reserved))
         }
-        progress?(Progress(done: decidingTotal, total: decidingTotal, file: "", step: .deciding))
+        progress?(Progress(done: facts.count, total: facts.count, file: "", step: .deciding))
 
         var plan = Plan(createdAt: Date(), inputFolder: folder, homeRoot: homeRoot, actions: actions,
                         skipped: skipped, waiting: waiting)
@@ -383,6 +392,9 @@ public struct Planner: Sendable {
     func accept(_ suggestion: ClassifierSuggestion, kind: FileKind, inside: FolderContents?, nsuEvidence: Bool,
                 nameUnclear: Bool, offered: [FolderOption], folders: [FolderOption],
                 newFolders: inout [String: String]) -> Decision {
+        // A classifier is pluggable: a confidence that isn't a number in 0...1 counts as none.
+        var suggestion = suggestion
+        suggestion.confidence = suggestion.confidence.isFinite ? min(max(suggestion.confidence, 0), 1) : 0
         guard suggestion.confidence >= config.confidenceThreshold else {
             return toReview("Model unsure (\(Int(suggestion.confidence * 100))%), would have chosen \(suggestion.destination): \(suggestion.reason)",
                             confidence: suggestion.confidence)
@@ -390,7 +402,8 @@ public struct Planner: Sendable {
 
         // Secure is where the safety rules put keys and recovery phrases. A model guess that
         // isn't sure would hide an ordinary file there: it goes to review instead.
-        if suggestion.destination == config.secure, suggestion.confidence < 0.9 {
+        if suggestion.destination == config.secure || suggestion.destination.hasPrefix(config.secure + "/"),
+           suggestion.confidence < 0.9 {
             return toReview("Model suggested Secure without being sure (\(Int(suggestion.confidence * 100))%): \(suggestion.reason)",
                             confidence: suggestion.confidence)
         }

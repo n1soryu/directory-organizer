@@ -135,13 +135,14 @@ public enum FolderAccess {
     }
 
     /// Your real folders. The app refuses to use them until real use is switched on.
+    /// Everything in your home folder outside the sandbox counts: a list of "real" folders
+    /// would always miss one (~/Library, ~/Public…).
     public static func isRealUserFolder(_ url: URL) -> Bool {
-        let home = FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL.path
+        let home = FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL.resolvingSymlinksInPath().path
+        let sandbox = AppSettings.sandboxRoot.standardizedFileURL.resolvingSymlinksInPath().path
         let path = url.standardizedFileURL.resolvingSymlinksInPath().path
-        if path == home { return true }
-        return ["Downloads", "Documents", "Desktop", "Pictures", "Movies", "Music"]
-            .map { home + "/" + $0 }
-            .contains { path == $0 || path.hasPrefix($0 + "/") }
+        guard path == home || path.hasPrefix(home + "/") else { return false }
+        return !(path == sandbox || path.hasPrefix(sandbox + "/"))
     }
 }
 
@@ -175,15 +176,35 @@ public struct AppSettings: Codable, Equatable, Sendable {
         self.homeRoot = homeRoot
     }
 
+    /// Every setting is optional in the file: one that's missing (written by an older version)
+    /// takes its default instead of making the whole file unreadable.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let defaults = AppSettings()
+        watchedFolder = try c.decodeIfPresent(String.self, forKey: .watchedFolder) ?? defaults.watchedFolder
+        homeRoot = try c.decodeIfPresent(String.self, forKey: .homeRoot) ?? defaults.homeRoot
+        watching = try c.decodeIfPresent(Bool.self, forKey: .watching) ?? defaults.watching
+        useModel = try c.decodeIfPresent(Bool.self, forKey: .useModel) ?? defaults.useModel
+        autoApply = try c.decodeIfPresent(AutoApplyPolicy.self, forKey: .autoApply) ?? defaults.autoApply
+        reviewReminderHours = try c.decodeIfPresent(Double.self, forKey: .reviewReminderHours) ?? defaults.reviewReminderHours
+        lastReviewReminder = try c.decodeIfPresent(Date.self, forKey: .lastReviewReminder)
+        notifyNewFiles = try c.decodeIfPresent(Bool.self, forKey: .notifyNewFiles) ?? defaults.notifyNewFiles
+        rejected = try c.decodeIfPresent([FileIdentity].self, forKey: .rejected) ?? []
+        realUseSince = try c.decodeIfPresent(Date.self, forKey: .realUseSince)
+    }
+
     public static var defaultURL: URL {
         FileManager.default.homeDirectoryForCurrentUser
             .appending(path: "Library/Application Support/DirectoryOrganizer/settings.json")
     }
 
+    /// The saved settings, or the defaults if there are none. A file that can't be read is
+    /// kept aside (renamed), not overwritten by the next save.
     public static func load(from url: URL = defaultURL) -> AppSettings {
-        guard let data = try? Data(contentsOf: url),
-              let settings = try? decoder.decode(AppSettings.self, from: data) else { return AppSettings() }
-        return settings
+        guard let data = try? Data(contentsOf: url) else { return AppSettings() }
+        if let settings = try? decoder.decode(AppSettings.self, from: data) { return settings }
+        KeepAside.unreadable(url)
+        return AppSettings()
     }
 
     public func save(to url: URL = AppSettings.defaultURL) throws {
@@ -213,5 +234,16 @@ public struct AppSettings: Codable, Equatable, Sendable {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         return decoder
+    }
+}
+
+/// A saved file that can't be read is renamed ("settings.json.unreadable-2026-10-16T10-00-00")
+/// rather than silently replaced: what was in it can still be recovered by hand.
+public enum KeepAside {
+    @discardableResult
+    public static func unreadable(_ url: URL) -> URL? {
+        let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
+        let aside = url.deletingLastPathComponent().appending(path: url.lastPathComponent + ".unreadable-" + stamp)
+        return (try? FileManager.default.moveItem(at: url, to: aside)) != nil ? aside : nil
     }
 }

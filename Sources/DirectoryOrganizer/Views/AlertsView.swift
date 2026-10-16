@@ -33,7 +33,9 @@ struct AlertsView: View {
                         .padding(16)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(kind.color.opacity(0.06))
-                        ForEach(groups[kind]!, id: \.1) { action, alert in
+                        // Two files can carry the same alert text: identify rows by position.
+                        ForEach(Array(groups[kind]!.enumerated()), id: \.offset) { _, entry in
+                            let (action, alert) = entry
                             Divider().padding(.leading, 16)
                             HStack(spacing: 12) {
                                 FileIcon(url: action.source, size: 28)

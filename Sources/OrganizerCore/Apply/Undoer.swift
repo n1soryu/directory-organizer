@@ -38,13 +38,26 @@ public struct Undoer: Sendable {
             result.error = "\(current.lastPathComponent) is no longer at \(current.deletingLastPathComponent().path); was it moved or deleted?"
             return result
         }
-        if let expected = record.sha256, let now = try? FileHash.sha256(current), now != expected {
+        // The same file: same content, or our origin note with this move's ID on it (then it
+        // was edited since). A different file that took its place is never "put back".
+        let contentMatches = record.sha256.map { (try? FileHash.sha256(current)) == $0 } ?? false
+        let ourNote = MoveOrigin.read(current)?.moveID == record.moveID
+        guard contentMatches || ourNote else {
+            result.error = "\(current.lastPathComponent) at \(current.deletingLastPathComponent().path) isn't the file that was moved there (different content, no trace of the move); nothing was changed"
+            return result
+        }
+        if !contentMatches, record.sha256 != nil {
             result.notes.append("the file was edited after it was moved; it goes back with your edits")
         }
 
         // Back to the original name, unless something new took it in the meantime.
         let original = URL(filePath: record.originalPath)
         let folder = original.deletingLastPathComponent()
+        // A folder replaced by a symlink since would send the file somewhere else entirely.
+        if (try? folder.resourceValues(forKeys: [.isSymbolicLinkKey]))?.isSymbolicLink == true {
+            result.error = "\(folder.path) is now a link to somewhere else; nothing was changed"
+            return result
+        }
         var target = original
         if fm.fileExists(atPath: target.path) {
             let ext = original.pathExtension

@@ -17,7 +17,7 @@ public struct CourseCatalog: Sendable {
     public static func codes(in text: String, uppercaseOnly: Bool = false) -> [String] {
         // NSU codes: 3 letters, optional space/dash/underscore, 3 digits, optional L for labs.
         // (NSRegularExpression because Swift's Regex has no lookbehind.)
-        let regex = try! NSRegularExpression(pattern: #"(?<![A-Za-z0-9])([A-Za-z]{3})[ \-_]?(\d{3})L?(?![A-Za-z0-9])"#)
+        let regex = Self.codePattern
         let ns = text as NSString
         return regex.matches(in: text, range: NSRange(location: 0, length: ns.length)).compactMap { match in
             let letters = ns.substring(with: match.range(at: 1))
@@ -25,6 +25,10 @@ public struct CourseCatalog: Sendable {
             return letters.uppercased() + ns.substring(with: match.range(at: 2))
         }
     }
+
+    /// Any letter or digit next to a code makes it not a code ("ЭECO372" isn't ECO372).
+    private static let codePattern = try! NSRegularExpression(   // fixed pattern: compiled once
+        pattern: #"(?<![\p{L}\p{N}])([A-Za-z]{3})[ \-_]?(\d{3})L?(?![\p{L}\p{N}])"#)
 
     /// Known course codes in `text`, most frequent first, with how often each appears.
     public func knownCodes(in text: String) -> [(code: String, count: Int)] {
@@ -45,8 +49,8 @@ public struct CourseCatalog: Sendable {
             guard words.count >= 2, title.count >= 12 else { return false }
             return haystack.contains(" " + Self.normalize(title) + " ")
         }
-        // Prefer the longest title when one contains another.
-        return hits.max { $0.value.count < $1.value.count }?.key
+        // Prefer the longest title when one contains another; on a tie, the first code.
+        return hits.sorted { $0.value.count != $1.value.count ? $0.value.count > $1.value.count : $0.key < $1.key }.first?.key
     }
 
     private static func normalize(_ s: String) -> String {

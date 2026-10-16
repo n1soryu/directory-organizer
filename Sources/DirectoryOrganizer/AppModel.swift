@@ -37,11 +37,8 @@ struct FullRun {
     let started = Date()
     var progress: Planner.Progress?
 
-    /// 0...1
-    var fraction: Double {
-        guard let progress, progress.total > 0 else { return 0 }
-        return Double(progress.done) / Double(progress.total)
-    }
+    /// 0...1, only ever growing.
+    var fraction: Double { progress?.fraction ?? 0 }
 }
 
 /// How the last Organize Now run went.
@@ -300,8 +297,9 @@ final class AppModel {
         if !newOnes.isEmpty {
             log(.info, "Scan found \(newOnes.count) new file\(newOnes.count == 1 ? "" : "s") (\(pending.count) waiting)")
         }
-        await notifyAbout(newOnes)
-        await autoApply()
+        // Auto-filing first: no "ready to file" for files that were just filed.
+        let filed = await autoApply()
+        await notifyAbout(newOnes.filter { !filed.contains($0.id) })
     }
 
     /// Saves what the last plan learned about your folders, if anything changed.
@@ -354,7 +352,11 @@ final class AppModel {
 
         do {
             let plan = try await fullPlanner.plan(folder: folder) { progress in
-                Task { @MainActor in AppModel.shared.organizing?.progress = progress }
+                // Updates hop to the main actor in no set order: an older one mustn't win.
+                Task { @MainActor in
+                    guard let run = AppModel.shared.organizing, progress.fraction >= run.fraction else { return }
+                    AppModel.shared.organizing?.progress = progress
+                }
             }
             deepResults = Dictionary(plan.actions.map { (FileIdentity($0), $0) }, uniquingKeysWith: { $1 })
             keepProfiles(plan.profiles)
@@ -414,10 +416,12 @@ final class AppModel {
                             body: names + (ordinary.count > 3 ? "…" : ""), page: .pending)
     }
 
-    private func autoApply() async {
+    /// Files the auto-apply settings allow, filed now. Returns the ones moved.
+    private func autoApply() async -> Set<ProposedAction.ID> {
         let eligible = pending.filter(settings.autoApply.allows)
-        guard !eligible.isEmpty else { return }
-        await apply(eligible, automatic: true)
+        guard !eligible.isEmpty else { return [] }
+        let results = await apply(eligible, automatic: true)
+        return Set(results.filter { $0.outcome == .moved }.map(\.action.id))
     }
 
     // MARK: - Approving and rejecting
@@ -448,8 +452,9 @@ final class AppModel {
         pending.append(contentsOf: actions)
     }
 
-    private func apply(_ actions: [ProposedAction], automatic: Bool) async {
-        guard !isLocked else { return }
+    @discardableResult
+    private func apply(_ actions: [ProposedAction], automatic: Bool) async -> [ApplyResult] {
+        guard !isLocked else { return [] }
         isApplying = true
         let applier = Applier(homeRoot: homeURL, journal: journal)
         let results = await Task.detached { applier.apply(actions) }.value
@@ -475,6 +480,7 @@ final class AppModel {
                                 body: moved.prefix(3).map(\.action.originalName).joined(separator: ", "), page: .history)
         }
         afterChange()
+        return results
     }
 
     // MARK: - Undo
@@ -659,10 +665,13 @@ final class AppModel {
     func display(_ url: URL) -> String { display(url.path) }
 
     func display(_ path: String) -> String {
-        let sandbox = URL(filePath: settings.homeRoot).deletingLastPathComponent().path + "/"
-        if path.hasPrefix(sandbox) { return String(path.dropFirst(sandbox.count)) }
+        // In the sandbox, relative to TestData ("Home/Documents/…").
+        if !isRealUseOn {
+            let sandbox = URL(filePath: settings.homeRoot).deletingLastPathComponent().path + "/"
+            if path.hasPrefix(sandbox) { return String(path.dropFirst(sandbox.count)) }
+        }
         let home = FileManager.default.homeDirectoryForCurrentUser.path
-        return path.hasPrefix(home) ? "~" + path.dropFirst(home.count) : path
+        return path == home || path.hasPrefix(home + "/") ? "~" + path.dropFirst(home.count) : path
     }
 
     /// A path relative to the home folder ("Documents/FSAE/x.pdf"), or the path itself if outside it.

@@ -20,12 +20,14 @@ public enum FileKind: String, Codable, Sendable {
     case folder
     case other
 
-    public init(fileExtension ext: String, isDirectory: Bool) {
+    /// A bundle (`isPackage`: .rtfd, .bundle, .photoslibrary…) is one thing, not a folder to
+    /// look into, even with an extension we don't know.
+    public init(fileExtension ext: String, isDirectory: Bool, isPackage: Bool = false) {
         let ext = ext.lowercased()
         if let kind = Self.byExtension[ext] {
             self = kind
         } else {
-            self = isDirectory ? .folder : .other
+            self = isDirectory && !isPackage ? .folder : .other
         }
     }
 
@@ -47,9 +49,9 @@ public enum FileKind: String, Codable, Sendable {
         add(.video, "mp4 m4v mov mkv avi mpeg mpg wmv webm flv 3gp")
         add(.audio, "mp3 m4a aac wav flac aiff aif ogg opus")
         add(.archive, "zip tar gz tgz bz2 xz 7z rar")
-        add(.diskImage, "dmg iso")
+        add(.diskImage, "dmg iso img")
         add(.installer, "pkg mpkg app exe msi appimage deb rpm apk")
-        add(.firmware, "bin img hex fw ipsw")
+        add(.firmware, "bin hex fw ipsw")
         add(.keyMaterial, "pem p12 pfx ppk kdbx ovpn mobileconfig asc gpg keychain-db 1pux")
         return map
     }()

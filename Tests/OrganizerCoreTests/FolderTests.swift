@@ -50,7 +50,9 @@ import TestDataKit
         #expect(contents.sample.contains("notes/seed.txt"))
         #expect(contents.sensitive.count == 1 && contents.sensitive[0].hasPrefix("notes/seed.txt: 12 BIP-39 words"))
         // The folder's size and date are the whole tree's.
-        #expect(facts.size == contents.totalSize && facts.size > 0)
+        let files = ["notes/seed.txt", "notes/list.txt"].map { downloads.appending(path: "Old phone backup/\($0)") }
+        let sizes = try files.map { Int64(try $0.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0) }
+        #expect(facts.size == sizes.reduce(0, +) && facts.size > 0)
         #expect(facts.fileExtension.isEmpty)
     }
 

@@ -133,10 +133,13 @@ public struct ProfileStore: Sendable {
         url = MoveJournal.url(forHome: home).deletingLastPathComponent().appending(path: "folder-profiles.json")
     }
 
+    /// What was learned, or nothing yet. A file that can't be read is kept aside, not
+    /// overwritten by the next save.
     public func load() -> [FolderProfile] {
-        guard let data = try? Data(contentsOf: url),
-              let profiles = try? Self.decoder.decode([FolderProfile].self, from: data) else { return [] }
-        return profiles
+        guard let data = try? Data(contentsOf: url) else { return [] }
+        if let profiles = try? Self.decoder.decode([FolderProfile].self, from: data) { return profiles }
+        KeepAside.unreadable(url)
+        return []
     }
 
     public func save(_ profiles: [FolderProfile]) throws {

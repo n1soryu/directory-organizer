@@ -9,7 +9,17 @@ public enum FinderTags {
     public static let attribute = "com.apple.metadata:_kMDItemUserTags"
 
     public static func readRaw(_ url: URL) -> [String] {
-        ExtendedAttributes.propertyList(attribute, at: url) as? [String] ?? []
+        (try? readRawChecked(url)) ?? []
+    }
+
+    /// The tags, [] if there are none, or an error if they're there but can't be read: then
+    /// they couldn't be put back after an undo either.
+    public static func readRawChecked(_ url: URL) throws -> [String] {
+        guard let data = try ExtendedAttributes.dataChecked(attribute, at: url), !data.isEmpty else { return [] }
+        guard let tags = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String] else {
+            throw CocoaError(.fileReadCorruptFile, userInfo: [NSFilePathErrorKey: url.path])
+        }
+        return tags
     }
 
     /// Writes exactly these tags. An empty list removes the attribute.

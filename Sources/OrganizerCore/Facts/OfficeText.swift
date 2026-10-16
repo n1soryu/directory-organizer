@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 /// Text from .docx/.xlsx/.pptx. These are zip archives of XML files, so we open the
@@ -73,5 +74,14 @@ private final class XMLText: NSObject, XMLParserDelegate {
 
     func parser(_ parser: XMLParser, foundCharacters string: String) {
         if only == nil || depthInWanted > 0 { text += string }
+    }
+}
+
+extension OfficeText {
+    /// Text of the other word-processor formats macOS itself converts (.rtf, .doc, .odt).
+    static func readOther(_ url: URL) -> String? {
+        guard let text = try? NSAttributedString(url: url, options: [:], documentAttributes: nil).string,
+              !text.isEmpty else { return nil }
+        return text
     }
 }

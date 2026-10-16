@@ -78,6 +78,6 @@ extension FileFacts {
 
 /// True if `phrase` appears in `text` as whole words.
 func containsWords(_ text: String, _ phrase: String) -> Bool {
-    let pattern = #"(?<![a-z0-9])"# + NSRegularExpression.escapedPattern(for: phrase) + #"(?![a-z0-9])"#
+    let pattern = #"(?<![\p{L}\p{N}])"# + NSRegularExpression.escapedPattern(for: phrase) + #"(?![\p{L}\p{N}])"#
     return text.range(of: pattern, options: [.regularExpression, .caseInsensitive]) != nil
 }
