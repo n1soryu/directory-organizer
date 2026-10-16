@@ -39,10 +39,13 @@ public struct AppleClassifier: FileClassifier {
         if let reason = Self.unavailableReason() { throw ClassifierError.unavailable(reason) }
 
         let folderChoices = request.folders.map(\.path) + [Self.noneFits]
-        // Property order is generation order: describe the file, decide whether a folder
-        // fits, and only then pick one. Tags aren't asked for: they follow from the folder.
+        // Property order is generation order: describe the file, reason about which folder's
+        // purpose matches, decide whether one fits, and only then pick it (a reason written
+        // after the choice only defends it). Tags aren't asked for: they follow from the folder.
         let schema = try GenerationSchema(root: DynamicGenerationSchema(name: "FileDecision", properties: [
             .init(name: "kind", description: "What this file is, in 2-5 words (e.g. router user manual, electricity bill, lecture slides)",
+                  schema: .init(type: String.self)),
+            .init(name: "reason", description: "One sentence: which listed folder's purpose matches this kind of file and why, or why none does",
                   schema: .init(type: String.self)),
             .init(name: "existingFolderFits", description: "Is there a listed folder whose purpose clearly matches this kind of file?",
                   schema: .init(name: "Fits", anyOf: ["yes", "no"])),
@@ -50,13 +53,12 @@ public struct AppleClassifier: FileClassifier {
                   schema: .init(name: "Folder", anyOf: folderChoices)),
             .init(name: "newName", description: "Only if the file name is unclear: a clear name of 2-8 words, no extension",
                   schema: .init(type: String.self), isOptional: true),
-            .init(name: "reason", description: "One sentence explaining the choice",
-                  schema: .init(type: String.self)),
             .init(name: "confidence", description: "How sure you are",
                   schema: .init(name: "Confidence", anyOf: ["high", "medium", "low"])),
         ]), dependencies: [])
 
-        let instructions = Self.instructions(folders: request.folders, review: request.reviewFolder)
+        let instructions = Self.instructions(folders: request.folders, review: request.reviewFolder,
+                                             corrections: request.corrections)
         let content = try await respond(instructions: instructions, schema: schema) { limit in
             Prompt { FactSummary.describe(request.facts, textLimit: limit) }
         }
@@ -205,28 +207,58 @@ public struct AppleClassifier: FileClassifier {
         }
     }
 
-    static func instructions(folders: [FolderOption], review: String) -> String {
+    static func instructions(folders: [FolderOption], review: String, corrections: [String] = []) -> String {
         let list = folders.map { folder in
             var line = "- \(folder.path)"
             if let purpose = folder.purpose { line += ": \(purpose)" }
-            if !folder.tags.isEmpty { line += " [tag: \(folder.tags.map(\.name).joined(separator: ", "))]" }
+            let examples = folder.examples.prefix(3).map { String($0.prefix(40)) }
+            if !examples.isEmpty { line += " (holds e.g. \(examples.joined(separator: "; ")))" }
             return line
         }.joined(separator: "\n")
-        return """
-            You sort downloaded files into folders on a Mac. The owner is an economics student at \
-            North South University (NSU) in Bangladesh and a member of the NSU Formula SAE team.
-            You only suggest; code checks your answer and the owner approves it.
+        var text = """
+            You sort downloaded files into folders on a Mac. You only suggest; code checks your answer \
+            and the owner can undo it.
 
-            Folders:
+            Folders, with what they're for and files already in them:
             \(list)
 
             Rules:
-            - A folder fits only if its purpose matches what the file is. Being a student does not make \
-            every file university material: a router manual or an electricity bill is not about the university.
-            - University folders are only for files from North South University (northsouth.edu) or about an NSU course.
+            - A folder fits only if its purpose matches what the file is. Compare with the files already in it.
+            - Don't force a file into a folder because a word matches: a recipe is not a work document, \
+            a phone manual is not school material.
             - If no folder's purpose matches what the file is, choose "none of these": a new folder will be made for it.
             - If you can't tell what the file is, choose \(review) with low confidence.
             - Suggest a new name only when the current name is unclear.
             """
+        if !corrections.isEmpty {
+            text += "\n\nThe owner corrected these earlier choices; don't repeat them:\n"
+                + corrections.map { "- \($0)" }.joined(separator: "\n")
+        }
+        return text
+    }
+
+    // MARK: - What is this folder of yours for?
+
+    public func describeFolder(_ profile: FolderProfile) async throws -> String {
+        if let reason = Self.unavailableReason() { throw ClassifierError.unavailable(reason) }
+        let schema = try GenerationSchema(root: DynamicGenerationSchema(name: "FolderPurpose", properties: [
+            .init(name: "purpose", description: "What kind of files belong in this folder, 2-8 words, plural (e.g. electricity and water bills, router and appliance manuals)",
+                  schema: .init(type: String.self)),
+        ]), dependencies: [])
+        let instructions = """
+            You describe a folder on a Mac so that new files can be matched to it. Say what kind of \
+            files it holds, judging by the files themselves more than by the folder's name. Be specific \
+            but general enough for similar future files. No dates, no file names.
+            """
+        var lines = ["Folder: \(profile.path)", "Files directly inside: \(profile.fileCount)"]
+        let kinds = profile.kinds.sorted { $0.value > $1.value }.map { "\($0.value) \($0.key)" }
+        if !kinds.isEmpty { lines.append("Kinds: \(kinds.joined(separator: ", "))") }
+        if !profile.examples.isEmpty { lines.append("Examples: \(profile.examples.joined(separator: "; "))") }
+        if !profile.sources.isEmpty { lines.append("Downloaded from: \(profile.sources.joined(separator: ", "))") }
+        if profile.fileCount == 0 { lines.append("The folder is empty: go by its name and where it is.") }
+        let summary = lines.joined(separator: "\n")
+        let content = try await respond(instructions: instructions, schema: schema) { _ in Prompt { summary } }
+        let purpose: String = try content.value(forProperty: "purpose")
+        return purpose.trimmingCharacters(in: CharacterSet(charactersIn: " .\"'\n"))
     }
 }

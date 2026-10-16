@@ -20,6 +20,11 @@ public struct Planner: Sendable {
     /// be unpacked at all. Bigger folders stay together.
     public var maxUnpackDepth = 2
     public var maxUnpackItems = 200
+    /// What's known about your folders from earlier runs (purposes above all). Refreshed by
+    /// every plan and returned in `Plan.profiles`, for the caller to keep.
+    public var profiles: [FolderProfile] = []
+    /// Model moves you undid, newest first: shown to the model so it doesn't repeat them.
+    public var corrections: [Correction] = []
 
     public enum Mode: Sendable {
         /// Rules only: no text recognition, no model. Seconds, not minutes. Files that need
@@ -37,6 +42,7 @@ public struct Planner: Sendable {
         public var step: Step
 
         public enum Step: String, Sendable {
+            case learning = "Learning your folders"
             case reading = "Reading"
             case deciding = "Deciding"
         }
@@ -104,7 +110,8 @@ public struct Planner: Sendable {
         var hashes = HashCache()
         let copies = duplicatesWithinBatch(facts, &hashes)
         var reserved = Set<String>()
-        let folders = FolderCatalog.options(homeRoot: homeRoot, config: config)
+        let learned = try await learnedProfiles(progress: progress)
+        let folders = FolderCatalog.options(profiles: learned, config: config)
         var newFolders: [String: String] = [:]
         var actions: [ProposedAction] = []
         var waiting: [WaitingItem] = []
@@ -138,7 +145,34 @@ public struct Planner: Sendable {
         var plan = Plan(createdAt: Date(), inputFolder: folder, homeRoot: homeRoot, actions: actions,
                         skipped: skipped, waiting: waiting)
         plan.unpacked = unpacked
+        plan.profiles = learned
         return plan
+    }
+
+    /// Your folders' profiles, up to date. Organize Now also has the model write the purpose of
+    /// every folder that has none yet, or whose contents changed a lot since it was written.
+    func learnedProfiles(progress: (@Sendable (Progress) -> Void)?) async throws -> [FolderProfile] {
+        var list = FolderProfiler.profiles(homeRoot: homeRoot, config: config, cached: profiles)
+        guard mode == .full else { return list }
+        // Only from real contents: a purpose guessed from an empty folder's name is a guess
+        // ("FSAE" → "financial records") that would mislead every later decision.
+        let todo = list.indices.filter { list[$0].fileCount > 0 && list[$0].needsPurpose }
+        for (step, index) in todo.enumerated() {
+            try Task.checkCancellation()
+            progress?(Progress(done: step, total: todo.count, file: list[index].path, step: .learning))
+            guard let raw = try? await classifier.describeFolder(list[index]),
+                  let purpose = Self.validPurpose(raw) else { continue }
+            list[index].purpose = purpose
+            list[index].purposeFileCount = list[index].fileCount
+        }
+        return list
+    }
+
+    /// A model-written folder purpose, or nil if it's no good.
+    static func validPurpose(_ raw: String) -> String? {
+        let purpose = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard (3...80).contains(purpose.count), purpose.filter(\.isLetter).count >= 3 else { return nil }
+        return purpose
     }
 
     /// Replaces each folder the model says to unpack with what's inside it, recursively up to
@@ -198,7 +232,17 @@ public struct Planner: Sendable {
     /// `newFolders` remembers new folders proposed earlier in this plan, so "Manual" and
     /// "Manuals" for two files become one folder.
     func decide(_ facts: FileFacts, folders: [FolderOption], newFolders: inout [String: String]) async -> Decision {
-        if var decision = rules.decide(facts, config: config) {
+        let ruled = rules.decide(facts, config: config)
+        // Text recognition failed even in a full run: it couldn't be checked for sensitive
+        // text, so it isn't filed anywhere but review (unless something sensitive was found).
+        if mode == .full, facts.needsDeepRead {
+            if let ruled, case .safety = ruled.source { return checked(ruled) }
+            return Decision(destination: config.reviewFolder, confidence: 0,
+                            reason: "Couldn't read the text in it, so it couldn't be checked for sensitive content",
+                            source: .safety("unreadable"),
+                            alerts: [Alert(.rejected, "Text recognition failed; check it yourself")])
+        }
+        if var decision = ruled {
             decision = checked(decision)
             if decision.newBaseName == nil, facts.nameIsUnclear, wantsName(decision, facts) {
                 if mode == .full {
@@ -213,9 +257,13 @@ public struct Planner: Sendable {
         guard mode == .full else {
             return toReview("No rule matched; waiting for Organize Now", confidence: 0)
         }
-        let request = ClassificationRequest(
-            facts: facts, folders: folders, newFolderParents: FolderCatalog.newFolderParents(for: facts.kind),
+        // Only the folders most likely to fit: the model's context window is small. New
+        // folders are still checked against all of them below.
+        let offered = FolderCatalog.relevant(folders, to: facts, config: config)
+        var request = ClassificationRequest(
+            facts: facts, folders: offered, newFolderParents: FolderCatalog.newFolderParents(for: facts),
             reviewFolder: config.reviewFolder)
+        request.corrections = relevantCorrections(for: facts, offered: offered).map(\.sentence)
         let suggestion: ClassifierSuggestion
         do {
             suggestion = try await classifier.suggest(request)
@@ -228,14 +276,21 @@ public struct Planner: Sendable {
                             confidence: suggestion.confidence)
         }
 
+        // Secure is where the safety rules put keys and recovery phrases. A model guess that
+        // isn't sure would hide an ordinary file there: it goes to review instead.
+        if suggestion.destination == config.secure, suggestion.confidence < 0.9 {
+            return toReview("Model suggested Secure without being sure (\(Int(suggestion.confidence * 100))%): \(suggestion.reason)",
+                            confidence: suggestion.confidence)
+        }
+
         // The folder must be one we offered, or a new folder that passes the checks.
         var destination = suggestion.destination
         if suggestion.isNewFolder {
-            switch newFolder(destination, kind: facts.kind, folders: folders, newFolders: &newFolders) {
+            switch newFolder(destination, kind: facts.kind, inside: facts.folder, folders: folders, newFolders: &newFolders) {
             case .success(let path): destination = path
             case .failure(let problem): return rejected(suggestion, problem.message)
             }
-        } else if !folders.contains(where: { $0.path == destination }) {
+        } else if !offered.contains(where: { $0.path == destination }) {
             return rejected(suggestion, "\(destination) wasn't one of the folders offered")
         }
 
@@ -251,6 +306,22 @@ public struct Planner: Sendable {
         return checked(Decision(destination: destination, newBaseName: newName, tags: tags,
                                 confidence: suggestion.confidence, reason: suggestion.reason,
                                 source: .classifier(classifier.name)))
+    }
+
+    /// Up to 3 of your corrections about the folders offered, the most similar files first.
+    func relevantCorrections(for facts: FileFacts, offered: [FolderOption]) -> [Correction] {
+        let paths = Set(offered.map(\.path))
+        let words = FolderCatalog.words(facts.name)
+        return corrections
+            .filter { paths.contains($0.wrongFolder) }
+            .enumerated()
+            .sorted { a, b in
+                let (x, y) = (FolderCatalog.words(a.element.fileName).intersection(words).count,
+                              FolderCatalog.words(b.element.fileName).intersection(words).count)
+                return x != y ? x > y : a.offset < b.offset
+            }
+            .prefix(3)
+            .map(\.element)
     }
 
     /// The tags of the folder, or of the nearest listed folder above it.
@@ -281,10 +352,10 @@ public struct Planner: Sendable {
 
     /// Checks a proposed new folder ("Documents/Manuals") and reuses an existing or already
     /// proposed folder with nearly the same name. At most 2 new levels below the parent.
-    func newFolder(_ path: String, kind: FileKind, folders: [FolderOption],
+    func newFolder(_ path: String, kind: FileKind, inside: FolderContents? = nil, folders: [FolderOption],
                    newFolders: inout [String: String]) -> Result<String, FolderProblem> {
         let parts = path.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
-        guard let parent = parts.first, FolderCatalog.newFolderParents(for: kind).contains(parent) else {
+        guard let parent = parts.first, FolderCatalog.newFolderParents(for: kind, inside: inside).contains(parent) else {
             return .failure(FolderProblem(message: "a \(kind.rawValue) file can't get a new folder under \(parts.first ?? "")"))
         }
         let names = Array(parts.dropFirst())
@@ -333,7 +404,8 @@ public struct Planner: Sendable {
                 // Images: "2026-10-12 Router wireless settings page", dated by when it was taken.
                 title = "\(FileNames.day(facts.image?.dateTaken ?? facts.downloadDate)) \(title)"
             } else if let code = decision.destination.split(separator: "/").last.map(String.init),
-                      config.courses.contains(code), !title.uppercased().contains(code) {
+                      config.courses.contains(code),
+                      !title.uppercased().replacingOccurrences(of: " ", with: "").contains(code) {
                 title = "\(code) \(title)"
             }
             decision.newBaseName = title

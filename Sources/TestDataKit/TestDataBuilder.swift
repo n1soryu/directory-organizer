@@ -71,6 +71,7 @@ private final class Builder {
     }
 
     func makeAll() throws {
+        try alreadyFiled()
         try university()
         try fsae()
         try media()
@@ -78,6 +79,53 @@ private final class Builder {
         try installersAndCode()
         try leftovers()
         try folders()
+    }
+
+    // MARK: Your folders, already in use (what folder profiles learn from)
+
+    func alreadyFiled() throws {
+        let fm = FileManager.default
+        func place(_ folder: String, _ name: String, tags: [Tag] = [], source: String? = nil,
+                   make: (URL) throws -> Void) throws {
+            let url = home.appending(path: "\(folder)/\(name)")
+            try fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try make(url)
+            if !tags.isEmpty { try FinderTags.writeRaw(tags.map(FinderTags.encode), to: url) }
+            if let source { try WhereFroms.write([source], to: url) }
+        }
+
+        try place(config.fsae, "2026-09 FSAE Meeting Minutes.docx", tags: [.fsae]) {
+            try Zipper.docx(paragraphs: ["NSU Formula SAE Team: Meeting Minutes", "Frame jig ordered. Brake supplier shortlisted."], to: $0)
+        }
+        try place(config.fsae, "Chassis Design Review.pdf", tags: [.fsae]) {
+            try Drawing.textPDF(pages: ["Formula SAE Chassis Design Review\nSpaceframe, 4130 steel\nTorsional stiffness target: 2000 Nm/deg"], to: $0)
+        }
+        try place(config.fsae, "Sponsorship Deck Notes.docx", tags: [.fsae]) {
+            try Zipper.docx(paragraphs: ["Sponsorship deck: tiers, logo placement, team photo"], to: $0)
+        }
+
+        try place(config.essays, "Urban transport essay.docx", tags: [.personal]) {
+            try Zipper.docx(paragraphs: ["Why Dhaka needs bus rapid transit", "Traffic costs the city millions of working hours each year."], to: $0)
+        }
+        try place(config.essays, "Reflection on microfinance.docx", tags: [.personal]) {
+            try Zipper.docx(paragraphs: ["Microfinance and women's empowerment: a reflection", "Group lending changed how credit reaches villages."], to: $0)
+        }
+
+        for (name, text) in [("ECO372 Lecture 04.pdf", "ECO 372 Introduction to Econometrics\nLecture 4: Multicollinearity"),
+                             ("ECO372 Problem Set 2.pdf", "ECO 372 Introduction to Econometrics\nProblem Set 2: OLS assumptions")] {
+            try place("Documents/University/ECO372", name, tags: [.nsu], source: "https://www.northsouth.edu/eco372") {
+                try Drawing.textPDF(pages: [text], to: $0)
+            }
+        }
+        try place("\(config.records)/Grades", "2026-02-10 Grade History.pdf", tags: [.nsu],
+                  source: "https://rds2.northsouth.edu/index.php/common/grade_history") {
+            try Drawing.textPDF(pages: ["North South University\nGrade History\n\nFall 2025  ECO 101  A"], to: $0)
+        }
+
+        for name in ["Inception (2010).mp4", "Interstellar (2014).mkv"] {
+            try place(config.films, name) { try Data("fake video \(name)".utf8).write(to: $0) }
+        }
+        try place("Music", "Lofi Study Mix.mp3") { try Data("fake audio".utf8).write(to: $0) }
     }
 
     // MARK: University
@@ -305,7 +353,8 @@ private final class Builder {
         // A film with its extras: one thing.
         let film = "Dune.Part.Two.2024.1080p.WEB-DL"
         try fm.createDirectory(at: file(film), withIntermediateDirectories: true)
-        try Data("fake video \(film)".utf8).write(to: file("\(film)/\(film).mp4"))
+        // Still not real video, but by far the biggest file, as a film is.
+        try (Data("fake video \(film)".utf8) + Data(repeating: 0x5A, count: 64 * 1024)).write(to: file("\(film)/\(film).mp4"))
         try write("1\n00:00:01,000 --> 00:00:04,000\nThe spice must flow.\n", "\(film)/\(film).en.srt")
         try write("Release notes\n", "\(film)/\(film).nfo")
         expect(film, config.reviewFolder)

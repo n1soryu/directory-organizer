@@ -6,49 +6,105 @@ public struct FolderOption: Codable, Hashable, Sendable {
     public var path: String
     public var purpose: String?
     public var tags: [Tag]
+    /// Recent file names in it, newest first.
+    public var examples: [String] = []
+    /// Files of each kind in it.
+    public var kinds: [String: Int] = [:]
+    /// Sites its files usually come from.
+    public var sources: [String] = []
+
+    public init(path: String, purpose: String?, tags: [Tag], examples: [String] = [],
+                kinds: [String: Int] = [:], sources: [String] = []) {
+        self.path = path
+        self.purpose = purpose
+        self.tags = tags
+        self.examples = examples
+        self.kinds = kinds
+        self.sources = sources
+    }
+
+    public init(_ profile: FolderProfile) {
+        self.init(path: profile.path, purpose: profile.purpose, tags: profile.tags,
+                  examples: profile.examples, kinds: profile.kinds, sources: profile.sources)
+    }
 }
 
-/// The folders offered to the model: your core folders (with descriptions) plus the folders
-/// that already exist under Documents, Pictures, Movies and Music (two levels deep).
+/// The folders files may go to: the two the app itself relies on (review, and Secure for
+/// keys and recovery phrases), plus your own folders as their profiles describe them.
 public enum FolderCatalog {
-    /// Folders that fit in the model's small context window comfortably.
-    public static let maxOptions = 80
+    /// Folders offered for one file: what fits in the model's small context window.
+    public static let maxOffered = 25
 
-    public static func core(_ config: OrganizerConfig) -> [FolderOption] {
+    /// The folders every user has, because the safety rules send files there.
+    public static func universal(_ config: OrganizerConfig) -> [FolderOption] {
         [
-            FolderOption(path: config.essays, purpose: "personal essays and own writing", tags: [.personal]),
-            FolderOption(path: config.fsae, purpose: "NSU Formula SAE racing team files", tags: [.fsae]),
-            FolderOption(path: config.secure, purpose: "identity documents, passwords, keys, sensitive personal records", tags: [.secure]),
-            FolderOption(path: config.university, purpose: "North South University (NSU) documents not tied to one course", tags: [.nsu]),
-            FolderOption(path: config.records, purpose: "official NSU records: grades, payments, registration", tags: [.nsu]),
-            FolderOption(path: config.downloadedImages, purpose: "downloaded pictures", tags: []),
-            FolderOption(path: config.films, purpose: "feature films", tags: []),
-            FolderOption(path: "Music", purpose: "music and audio", tags: []),
+            FolderOption(path: config.secure, purpose: "passwords, private keys, recovery phrases and identity documents (passport, national ID); not bills, receipts or statements", tags: [.secure]),
             FolderOption(path: config.reviewFolder, purpose: "anything uncertain, temporary or probably deletable", tags: []),
         ]
     }
 
-    /// Core folders plus existing ones, without duplicates, at most `maxOptions`.
-    public static func options(homeRoot: URL, config: OrganizerConfig) -> [FolderOption] {
-        var result = core(config)
+    /// Universal folders plus your folders, without duplicates.
+    public static func options(profiles: [FolderProfile], config: OrganizerConfig) -> [FolderOption] {
+        var result = universal(config)
         var seen = Set(result.map { $0.path.lowercased() })
-        let coreTags = result.filter { !$0.tags.isEmpty }
-
-        for root in ["Documents", "Pictures", "Movies", "Music"] {
-            for path in subfolders(of: root, in: homeRoot, depth: 2) where !seen.contains(path.lowercased()) {
-                guard DestinationValidator.problem(with: path, config: config) == nil else { continue }
-                // A folder inside University gets NSU, inside FSAE gets FSAE, and so on.
-                let tags = coreTags.first { path.hasPrefix($0.path + "/") }?.tags ?? []
-                result.append(FolderOption(path: path, purpose: nil, tags: tags))
-                seen.insert(path.lowercased())
-            }
+        for profile in profiles where seen.insert(profile.path.lowercased()).inserted {
+            result.append(FolderOption(profile))
         }
-        return Array(result.prefix(maxOptions))
+        return result
     }
 
-    /// Where a new folder may go for this kind of file.
-    public static func newFolderParents(for kind: FileKind) -> [String] {
-        switch kind {
+    /// Your folders as they are on disk now, with no learned purposes.
+    public static func options(homeRoot: URL, config: OrganizerConfig) -> [FolderOption] {
+        options(profiles: FolderProfiler.profiles(homeRoot: homeRoot, config: config), config: config)
+    }
+
+    /// The folders most likely to fit `facts`, at most `limit`: the universal ones always, then
+    /// your folders ranked by shared words (name, purpose, examples), download site and file
+    /// kind. Only ranking: the planner still checks new folders against all of them.
+    public static func relevant(_ folders: [FolderOption], to facts: FileFacts, config: OrganizerConfig,
+                                limit: Int = maxOffered) -> [FolderOption] {
+        let universalPaths = Set(universal(config).map(\.path))
+        let fixed = folders.filter { universalPaths.contains($0.path) }
+        let rest = folders.filter { !universalPaths.contains($0.path) }
+        guard fixed.count + rest.count > limit else { return folders }
+
+        let words = Self.words(facts.name + " " + facts.head(1_500) + " " + (facts.documentTitle ?? ""))
+        let hosts = Set(facts.sourceHosts)
+        func score(_ folder: FolderOption) -> Double {
+            let folderWords = Self.words(([folder.path, folder.purpose ?? ""] + folder.examples).joined(separator: " "))
+            var score = Double(words.intersection(folderWords).count)
+            if folder.sources.contains(where: { source in hosts.contains { $0 == source || $0.hasSuffix("." + source) } }) { score += 3 }
+            if let count = folder.kinds[facts.kind.rawValue], count > 0 { score += 2 }
+            return score
+        }
+        // Stable: equal scores keep the catalog's order.
+        let scores: [Double] = rest.map(score)
+        let order: [Int] = rest.indices.sorted { a, b in
+            scores[a] != scores[b] ? scores[a] > scores[b] : a < b
+        }
+        return fixed + order.prefix(max(0, limit - fixed.count)).map { rest[$0] }
+    }
+
+    /// Lowercased words of 3+ letters, singular-ish, without the most common filler.
+    static func words(_ text: String) -> Set<String> {
+        let filler: Set<String> = ["the", "and", "for", "with", "from", "this", "that", "your", "are", "you", "pdf", "files", "file"]
+        return Set(text.lowercased().split { !$0.isLetter }.map(String.init)
+            .filter { $0.count >= 3 && !filler.contains($0) }
+            .map { $0.count > 4 && $0.hasSuffix("s") ? String($0.dropLast()) : $0 })
+    }
+
+    /// Where a new folder may go for this item. A downloaded folder goes by what most of its
+    /// bytes are: a film with subtitles is a video folder, under Movies.
+    public static func newFolderParents(for facts: FileFacts) -> [String] {
+        newFolderParents(for: facts.kind, inside: facts.folder)
+    }
+
+    public static func newFolderParents(for kind: FileKind, inside: FolderContents? = nil) -> [String] {
+        if kind == .folder, let mostly = inside?.kindBytes.max(by: { $0.value < $1.value })?.key,
+           let inner = FileKind(rawValue: mostly), inner != .folder {
+            return newFolderParents(for: inner)
+        }
+        return switch kind {
         case .image: ["Pictures"]
         case .video: ["Movies"]
         case .audio: ["Music"]

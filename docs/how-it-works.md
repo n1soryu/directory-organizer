@@ -27,7 +27,7 @@ A wrong guess sends the file to the review folder; it is never lost.
 
 **Next (approved 2026-10-14):** a model-led app with few rules, in phases:
 1. Folders in Downloads: read inside, safety-checked, left alone while changing, unpacked when the model says so ✅ (0.7.0-dev)
-2. Folder profiles learned from your own folders (replacing the fixed folder list and personal prompt)
+2. Folder profiles learned from your own folders (replacing the fixed folder list and personal prompt) ✅
 3. Grouping: code groups similar files, the model decides per group; new folders only for groups of 2–3+
 4. Evaluation harness (the old Milestone 6), before any autonomy
 5. Only universal rules left (safety, installers, code projects, incomplete downloads); NSU/FSAE/course rules removed
@@ -92,6 +92,29 @@ Music folders until real use is switched on deliberately.
 8. **Images** → `Pictures/Downloaded Images`
 9. Anything else → the model (below). If it's unavailable or unsure: review.
 
+## Your folders, learned (folder profiles)
+
+The app doesn't come with a list of your folders. Every scan reads the folders under Documents,
+Pictures, Movies and Music (two levels deep; a root itself only if files sit directly in it) into
+**profiles**: how many files, of which kinds, the newest file names as examples, the sites they
+were downloaded from, and the Finder tags most of them carry (2+ files and 60%+).
+
+- **Purpose:** Organize Now has the model read a profile and write what the folder is for
+  ("PDF lecture notes and problem sets"). Only from real files: an empty folder gets no purpose,
+  since one guessed from a name ("FSAE" → "financial records") misleads every later choice. A
+  purpose is rewritten when the folder has grown or shrunk by half (and 3+ files).
+- **Tags** of a folder are the ones most of its files carry, so files placed there match them.
+- Fixed in code are only the two folders the safety rules rely on: the review folder and
+  `Documents/Secure` (keys, recovery phrases, identity documents; *not* bills or receipts).
+- Profiles are kept in `folder-profiles.json` next to the move log (`TestData/` in the sandbox,
+  Application Support for your real folders) and shown on the Folders page.
+- **Shortlist:** each file is offered the 25 folders most likely to fit (shared words with the
+  folder's name, purpose and examples; same download site; same kind of file), so the prompt
+  fits the model's small context window. New folders are still checked against all folders.
+- **Corrections:** a model move you undo is remembered ("notes.txt does not belong in
+  Documents/FSAE") and up to 3 relevant ones are shown to the model next time. Moves you keep
+  teach by example: the file becomes one of the folder's examples.
+
 ## The model (Apple's on-device Foundation Models)
 
 Used only where rules can't decide, and only ever *suggests*:
@@ -112,7 +135,12 @@ Swift then checks every answer:
   "Manual" → "Manuals".
 - University folders need NSU evidence the model can't make up: a northsouth.edu source,
   "North South University" in the text, or a known course code.
-- **Tags come from the folder**, never from the model.
+- **Tags come from the folder** (the ones most of its files carry), never from the model.
+- `Documents/Secure` only with high confidence; a guess goes to review instead.
+- The answer is generated in order *what is it → which folder's purpose matches and why →
+  folder*: a reason written after the choice would only defend it.
+- **Unreadable is not clean:** if text recognition fails (it's retried once), the file can't be
+  checked for sensitive text, so it goes to review, never into a folder as if it were safe.
 - confidence is chosen as high / medium / low (small models are poor at exact numbers):
   0.9 / 0.75 / 0.4, with a threshold of 0.75. Below it, the file goes to review.
 - if Apple Intelligence is off or still downloading, leftovers simply go to review.
@@ -261,7 +289,8 @@ Sources/OrganizerCore/   facts, safety, rules, planning, applying (no UI)
   Classify/    FileClassifier protocol, AppleClassifier (Foundation Models), FactSummary
   Planning/    Planner (duplicates, clashes, new folders), DestinationValidator
   Apply/       Applier, Undoer, SafeMove, MoveJournal (write-ahead log), FinderTags
-  Config/      folder layout, record types, NSU course catalog, FolderCatalog (folders offered to the model)
+  Config/      folder layout, record types, NSU course catalog, FolderCatalog (folders offered to the model),
+               FolderProfile (what your folders hold, learned)
 Sources/TestDataKit/     generates realistic fake downloads + expected results
 Sources/organize/        the CLI (plan, apply, undo, log, model, facts)
 Sources/DirectoryOrganizer/  the menu-bar app: AppModel (state, scans, moves), Views/ (dashboard pages)

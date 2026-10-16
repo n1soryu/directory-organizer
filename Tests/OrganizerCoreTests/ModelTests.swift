@@ -44,7 +44,14 @@ struct FakeClassifier: FileClassifier {
 
     @Test func acceptsAnOfferedFolderAndTakesTagsFromIt() async throws {
         defer { try? FileManager.default.removeItem(at: home) }
-        let decision = await try planner(suggest("Documents/Essays")).decide(facts(name: "essay.docx", text: "My essay"))
+        let planner = try planner(suggest("Documents/Essays"))
+        // The folder's tag is the one its files carry.
+        for name in ["a.docx", "b.docx"] {
+            let file = home.appending(path: "Documents/Essays/\(name)")
+            try Data("x".utf8).write(to: file)
+            try FinderTags.writeRaw([FinderTags.encode(.personal)], to: file)
+        }
+        let decision = await planner.decide(facts(name: "essay.docx", text: "My essay"))
         #expect(decision.destination == "Documents/Essays")
         #expect(decision.tags == [.personal])
     }
@@ -144,11 +151,17 @@ struct FakeClassifier: FileClassifier {
 }
 
 @Suite struct FolderCatalogTests {
-    @Test func discoversFoldersAndInheritsTags() throws {
+    @Test func discoversFoldersAndLearnsTagsFromTheirFiles() throws {
         let home = FileManager.default.temporaryDirectory.appending(path: "catalog-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: home) }
         for folder in ["Documents/University/ECO372", "Documents/.secret", "Pictures/Wallpapers", "Pictures/Lib.photoslibrary"] {
             try FileManager.default.createDirectory(at: home.appending(path: folder), withIntermediateDirectories: true)
+        }
+        // 2 of 3 files carry NSU: that's the folder's tag. 1 of 3 carries Work: not enough.
+        for (name, tags) in [("a.pdf", [Tag.nsu]), ("b.pdf", [.nsu, Tag("Work", .none)]), ("c.pdf", [])] {
+            let file = home.appending(path: "Documents/University/ECO372/\(name)")
+            try Data(name.utf8).write(to: file)
+            try FinderTags.writeRaw(tags.map(FinderTags.encode), to: file)
         }
         let options = FolderCatalog.options(homeRoot: home, config: OrganizerConfig())
         let paths = options.map(\.path)
@@ -156,6 +169,9 @@ struct FakeClassifier: FileClassifier {
         #expect(paths.contains("Pictures/Wallpapers"))
         #expect(!paths.contains { $0.contains(".secret") || $0.contains("photoslibrary") })
         #expect(options.first { $0.path == "Documents/University/ECO372" }?.tags == [.nsu])
+        // Empty roots aren't destinations; the two universal folders always are.
+        #expect(!paths.contains("Documents") && !paths.contains("Music"))
+        #expect(paths.contains("Desktop/To Delete (Review)") && paths.contains("Documents/Secure"))
     }
 
     @Test func looseNamesMatch() {

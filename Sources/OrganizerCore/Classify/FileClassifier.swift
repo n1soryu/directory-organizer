@@ -9,6 +9,8 @@ public struct ClassificationRequest: Sendable {
     public var newFolderParents: [String]
     /// Where uncertain files go.
     public var reviewFolder: String
+    /// Your past corrections that look relevant: "x.pdf doesn't belong in Documents/FSAE".
+    public var corrections: [String] = []
 }
 
 /// What a model may say about a file: a suggestion, never an action.
@@ -84,11 +86,18 @@ public protocol FileClassifier: Sendable {
     func suggestName(for facts: FileFacts) async throws -> NameSuggestion
     /// Keep a downloaded folder together, or unpack it so each item inside is placed on its own?
     func suggestUnpack(for facts: FileFacts) async throws -> UnpackSuggestion
+    /// What one of your folders is for, in a few words, from what's in it.
+    func describeFolder(_ profile: FolderProfile) async throws -> String
 }
 
 extension FileClassifier {
     /// Without a model a folder is never unpacked: it stays together.
     public func suggestUnpack(for facts: FileFacts) async throws -> UnpackSuggestion {
+        throw ClassifierError.unavailable("no model in use")
+    }
+
+    /// Without a model a folder's purpose stays unknown.
+    public func describeFolder(_ profile: FolderProfile) async throws -> String {
         throw ClassifierError.unavailable("no model in use")
     }
 }
@@ -104,5 +113,33 @@ public struct StubClassifier: FileClassifier {
 
     public func suggestName(for facts: FileFacts) async throws -> NameSuggestion {
         throw ClassifierError.unavailable("no model in use")
+    }
+}
+
+/// A move of the model's you undid: a sign of where a kind of file does *not* go.
+public struct Correction: Codable, Sendable, Equatable {
+    public var fileName: String
+    /// Relative to the home root.
+    public var wrongFolder: String
+
+    public init(fileName: String, wrongFolder: String) {
+        self.fileName = fileName
+        self.wrongFolder = wrongFolder
+    }
+
+    public var sentence: String { "\"\(fileName)\" does not belong in \(wrongFolder)" }
+
+    /// Model moves you undid, newest first.
+    public static func from(_ records: [MoveRecord], homeRoot: URL) -> [Correction] {
+        let home = homeRoot.standardizedFileURL.path + "/"
+        return records
+            .filter { $0.state == .undone && ($0.decidedBy?.hasPrefix("model") ?? false) }
+            .sorted { $0.time > $1.time }
+            .compactMap { record in
+                let folder = URL(filePath: record.movedPath).deletingLastPathComponent().standardizedFileURL.path
+                guard folder.hasPrefix(home) else { return nil }
+                return Correction(fileName: URL(filePath: record.originalPath).lastPathComponent,
+                                  wrongFolder: String(folder.dropFirst(home.count)))
+            }
     }
 }

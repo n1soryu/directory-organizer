@@ -177,6 +177,9 @@ final class AppModel {
     /// Quick scans only see the folder, so they show these instead while they still apply.
     private var deepUnpacked: [String: [ProposedAction]] = [:]
     private var retryTask: Task<Void, Never>?
+    /// What's known about your folders (purposes learned by Organize Now), kept on disk.
+    private var profiles: [FolderProfile] = []
+    var profileStore: ProfileStore { ProfileStore(forHome: homeURL) }
     private var organizeTask: Task<Void, Never>?
     private var watcher: FolderWatcher?
     private var scanRequested = false
@@ -206,6 +209,7 @@ final class AppModel {
         log(.info, "Directory Organizer started (sandbox: \(display(watchedURL)))")
         refreshModelStatus()
         reloadJournal()
+        profiles = profileStore.load()
         refreshReviewFolder()
         updateWatcher()
         startReminderLoop()
@@ -241,6 +245,8 @@ final class AppModel {
         // Quick scan: rules only, no text recognition, no model. Heavy work waits for Organize Now.
         var planner = Planner(homeRoot: homeURL, mode: .quick)
         planner.onlyAddedAfter = settings.realUseSince
+        planner.profiles = profiles
+        planner.corrections = Correction.from(records, homeRoot: homeURL)
         let plan: Plan
         do {
             plan = try await planner.plan(folder: watchedURL)
@@ -274,7 +280,8 @@ final class AppModel {
         skipped = plan.skipped
         scheduleRetry(plan.skipped.compactMap(\.retryAfter).min())
         selection = selection.intersection(Set(pending.map(\.id)))
-        folderOptions = FolderCatalog.options(homeRoot: homeURL, config: planner.config)
+        keepProfiles(plan.profiles)
+        folderOptions = FolderCatalog.options(profiles: profiles, config: planner.config)
         lastScan = Date()
         lastScanDuration = Date().timeIntervalSince(started)
 
@@ -290,6 +297,13 @@ final class AppModel {
             scanRequested = false
             await scan()
         }
+    }
+
+    /// Saves what the last plan learned about your folders, if anything changed.
+    private func keepProfiles(_ fresh: [FolderProfile]) {
+        guard fresh != profiles else { return }
+        profiles = fresh
+        do { try profileStore.save(fresh) } catch { log(.warning, "Couldn't save what was learned about your folders: \(error.localizedDescription)") }
     }
 
     /// A folder was still changing: look again once it should have settled. (Nothing else
@@ -324,6 +338,8 @@ final class AppModel {
         refreshModelStatus()
         var planner = Planner(homeRoot: homeURL, mode: .full)
         planner.onlyAddedAfter = settings.realUseSince
+        planner.profiles = profiles
+        planner.corrections = Correction.from(records, homeRoot: homeURL)
         if settings.useModel, modelUnavailableReason == nil {
             planner.classifier = AppleClassifier()
         }
@@ -336,6 +352,7 @@ final class AppModel {
                 Task { @MainActor in AppModel.shared.organizing?.progress = progress }
             }
             deepResults = Dictionary(plan.actions.map { (FileIdentity($0), $0) }, uniquingKeysWith: { $1 })
+            keepProfiles(plan.profiles)
             // Only the outermost unpacked folders show up in quick scans.
             let outermost = plan.unpacked.filter { $0.deletingLastPathComponent().standardizedFileURL == folder.standardizedFileURL }
             deepUnpacked = Dictionary(outermost.map { unpacked in
@@ -547,6 +564,7 @@ final class AppModel {
         if let home { settings.homeRoot = home.path }
         knownPendingIDs = []
         pending = []
+        profiles = profileStore.load()
         reloadJournal()
         refreshReviewFolder()
         updateWatcher()

@@ -62,6 +62,8 @@ public struct Plan: Codable, Sendable {
     /// Folders the model unpacked: their contents are planned item by item (and appear in
     /// `actions` with sources inside these folders).
     public var unpacked: [URL] = []
+    /// Your folders as this plan saw them, with purposes learned so far: keep them for next time.
+    public var profiles: [FolderProfile] = []
 
     public var alerts: [(action: ProposedAction, alert: Alert)] {
         actions.flatMap { action in action.alerts.map { (action, $0) } }

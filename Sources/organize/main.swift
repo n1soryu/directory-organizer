@@ -109,6 +109,10 @@ struct Arguments {
 
 func makePlan(_ folder: URL, _ home: URL, useModel: Bool, quick: Bool = false) async -> Plan {
     var planner = Planner(homeRoot: home, mode: quick ? .quick : .full)
+    // What earlier runs learned about the folders, and the model moves you undid.
+    let store = ProfileStore(forHome: home)
+    planner.profiles = store.load()
+    planner.corrections = Correction.from((try? journal(for: home).records()) ?? [], homeRoot: home)
     if useModel, !quick {
         planner.classifier = AppleClassifier()
         if let reason = AppleClassifier.unavailableReason() {
@@ -116,7 +120,9 @@ func makePlan(_ folder: URL, _ home: URL, useModel: Bool, quick: Bool = false) a
         }
     }
     do {
-        return try await planner.plan(folder: folder)
+        let plan = try await planner.plan(folder: folder)
+        try? store.save(plan.profiles)
+        return plan
     } catch {
         fail("couldn't read \(folder.path): \(error.localizedDescription)")
     }

@@ -11,7 +11,7 @@ struct FoldersView: View {
         let created = createdFolders
         Page {
             SectionTitle(title: "Folders",
-                         subtitle: "The only places files can go. The model picks from these or proposes a new category folder, which you approve. Tags come from the folder.")
+                         subtitle: "The only places files can go. What each is for is learned from the files in it (Organize Now writes it). Tags are the ones most of its files carry.")
             LazyVGrid(columns: columns, spacing: 14) {
                 ForEach(model.folderOptions.map(FolderRow.init)) { row in
                     let lane = Lane.of(row.option.path)
@@ -32,7 +32,9 @@ struct FoldersView: View {
                                 .disabled(!row.exists)
                                 .help("Show in Finder")
                             }
-                            Text(row.option.purpose ?? "Existing folder")
+                            Text(row.option.purpose
+                                 ?? (row.option.kinds.isEmpty ? "No files of its own yet, so nothing to learn from"
+                                                              : "Not learned yet: Organize Now will describe it"))
                                 .font(.callout).foregroundStyle(row.option.purpose == nil ? .tertiary : .secondary)
                                 .lineLimit(2, reservesSpace: true)
                             HStack(spacing: 6) {

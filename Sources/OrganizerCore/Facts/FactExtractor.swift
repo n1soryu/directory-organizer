@@ -65,7 +65,13 @@ public struct FactExtractor: Sendable {
             }
             // OCR every image: it's how a photographed recovery phrase gets caught.
             if recognizeText {
-                facts.setText(await TextRecognizer.text(at: url), source: .imageOCR, limit: limit)
+                if let text = await TextRecognizer.text(at: url) {
+                    facts.setText(text, source: .imageOCR, limit: limit)
+                } else {
+                    // Unread is not the same as "nothing sensitive": it stays unchecked.
+                    facts.needsDeepRead = true
+                    facts.notes.append("Text recognition failed")
+                }
             } else {
                 facts.needsDeepRead = true
             }
@@ -136,7 +142,12 @@ public struct FactExtractor: Sendable {
             }
             var ocr = ""
             for page in PDFText.renderPages(facts.url, maxPages: maxPages) {
-                ocr += await TextRecognizer.text(in: page) + "\n"
+                guard let text = await TextRecognizer.text(in: page) else {
+                    facts.needsDeepRead = true
+                    facts.notes.append("Text recognition failed")
+                    return
+                }
+                ocr += text + "\n"
             }
             facts.setText(ocr, source: .pdfOCR, limit: limit)
         }

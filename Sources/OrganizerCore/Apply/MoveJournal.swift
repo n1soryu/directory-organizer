@@ -56,6 +56,8 @@ public struct MoveRecord: Sendable {
     public var tagsAfter: [String]
     public var createdFolders: [String]
     public var reason: String?
+    /// "rule: course", "model: apple", "safety: duplicate".
+    public var decidedBy: String?
     public var state: State
 }
 
@@ -128,7 +130,8 @@ public struct MoveJournal: Sendable {
                     moveID: entry.moveID, batchID: entry.batchID, time: entry.time,
                     originalPath: entry.from, movedPath: entry.to, sha256: entry.sha256,
                     tagsBefore: entry.tagsBefore ?? [], tagsAfter: entry.tagsAfter ?? [],
-                    createdFolders: entry.createdFolders ?? [], reason: entry.reason, state: .pending)
+                    createdFolders: entry.createdFolders ?? [], reason: entry.reason,
+                    decidedBy: entry.decidedBy, state: .pending)
             case .moveDone:
                 byID[entry.moveID]?.state = .moved
                 if let tags = entry.tagsAfter { byID[entry.moveID]?.tagsAfter = tags }

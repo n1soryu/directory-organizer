@@ -14,6 +14,8 @@ public struct FolderContents: Codable, Sendable, Equatable {
     public var truncated = false
     /// How many files of each kind ("pdf document" → 12).
     public var kinds: [String: Int] = [:]
+    /// Bytes of each kind: a film folder is one big video and a few small text files.
+    public var kindBytes: [String: Int64] = [:]
     /// Paths relative to the folder, shallowest first, for the model and the app.
     public var sample: [String] = []
     /// Sensitive files found inside: "keys/id_ed25519: Private Key (OPENSSH PRIVATE KEY)".
@@ -67,6 +69,7 @@ public enum FolderScan {
                 contents.totalSize += Int64(values?.fileSize ?? 0)
                 let kind = FileKind(fileExtension: url.pathExtension, isDirectory: values?.isDirectory ?? false)
                 contents.kinds[kind.rawValue, default: 0] += 1
+                contents.kindBytes[kind.rawValue, default: 0] += Int64(values?.fileSize ?? 0)
                 files.append(url)
             }
         }
