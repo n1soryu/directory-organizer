@@ -89,12 +89,19 @@ enum DebugSnapshot {
 
             let incoming = model.watchedURL.appending(path: "ECO204 Lecture 07.pdf")
             try? Data("%PDF-1.4 fake".utf8).write(to: incoming)
-            for _ in 0..<60 where !model.pending.contains(where: { $0.originalName == incoming.lastPathComponent }) {
+            // It's not a real PDF (just "%PDF-1.4 fake"), so it can't be read: it waits instead of
+            // being filed by its name (unread isn't clean). Either way, the watcher saw it.
+            @MainActor func found() -> String? {
+                if let action = model.pending.first(where: { $0.originalName == incoming.lastPathComponent }) {
+                    return "pending → \(action.destinationPath)"
+                }
+                return model.waiting.first { $0.name == incoming.lastPathComponent }.map { "waiting (\($0.reason))" }
+            }
+            for _ in 0..<60 where found() == nil {
                 try? await Task.sleep(for: .milliseconds(250))
             }
             await settle()
-            let seen = model.pending.first { $0.originalName == incoming.lastPathComponent }
-            say("watcher: new download \(seen == nil ? "NOT seen" : "seen → \(seen!.destinationPath)")")
+            say("watcher: new download \(found().map { "seen, \($0)" } ?? "NOT seen")")
 
             model.undo(model.movedRecords)
             await settle()

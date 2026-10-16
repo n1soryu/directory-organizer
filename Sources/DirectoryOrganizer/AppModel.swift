@@ -212,6 +212,8 @@ final class AppModel {
         refreshReviewFolder()
         updateWatcher()
         startReminderLoop()
+        // Text recognition's first use can take ~26 s; get it out of the way now.
+        Task.detached(priority: .utility) { await TextRecognition.warmUp() }
         Task {
             notificationStatus = await notifier.status()
             if notificationStatus == .notDetermined { notificationStatus = await notifier.requestAuthorization() }

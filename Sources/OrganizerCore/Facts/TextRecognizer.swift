@@ -21,7 +21,10 @@ enum TextRecognizer {
         var request = RecognizeTextRequest()
         request.recognitionLevel = .accurate
         // Normally well under a second; a stalled call counts as failed (nil), not as "no text".
-        let attempt = { [request] in try? await withTimeout(seconds: 30) { try await perform(request) } }
+        // Measured: the first call in a process sometimes takes ~26 s while Vision loads its
+        // model, every later one well under a second. A limit near that would mark ordinary
+        // images unreadable; 60 s still catches a call that never returns.
+        let attempt = { [request] in try? await withTimeout(seconds: 60) { try await perform(request) } }
         var result = await attempt() ?? nil
         if result == nil {
             try? await Task.sleep(for: .milliseconds(200))
@@ -35,5 +38,16 @@ enum TextRecognizer {
             .sorted { line($0) != line($1) ? line($0) > line($1) : $0.boundingBox.origin.x < $1.boundingBox.origin.x }
             .compactMap { $0.topCandidates(1).first?.string }
             .joined(separator: "\n")
+    }
+}
+
+/// Loading Vision's text model can take ~26 s the first time in a process. The app does that
+/// in the background at launch, so Organize Now doesn't wait for it.
+public enum TextRecognition {
+    public static func warmUp() async {
+        guard let context = CGContext(data: nil, width: 32, height: 32, bitsPerComponent: 8, bytesPerRow: 0,
+                                      space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.none.rawValue),
+              let blank = context.makeImage() else { return }
+        _ = await TextRecognizer.text(in: blank)
     }
 }
