@@ -106,6 +106,11 @@ public struct FactExtractor: Sendable {
     private func readFolder(into facts: inout FileFacts) async {
         var (contents, files) = FolderScan.scan(facts.url)
         let base = facts.url.standardizedFileURL.path + "/"
+        // Shallowest first, then by name: the same files are checked every time.
+        files.sort {
+            let (a, b) = ($0.pathComponents.count, $1.pathComponents.count)
+            return a != b ? a < b : $0.path < $1.path
+        }
         for file in files.prefix(Self.maxFolderFilesChecked) {
             let inner = await self.facts(for: file)
             let relative = String(file.standardizedFileURL.path.dropFirst(base.count))

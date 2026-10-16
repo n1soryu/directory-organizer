@@ -81,10 +81,30 @@ public struct MoveJournal: Sendable {
 
     /// Appends one entry and flushes it to disk before returning.
     public func append(_ entry: JournalEntry) throws {
+        try locked { try write(entry) }
+    }
+
+    /// One writer at a time: the app and the `organize` command share the log, and recovery
+    /// reads then writes. The lock is a separate file, so the log itself is never rewritten.
+    private func locked<T>(_ body: () throws -> T) throws -> T {
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let lockPath = url.path + ".lock"
+        let fd = open(lockPath, O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0o644)
+        guard fd >= 0 else { throw MoveError.system("opening the move log's lock", errno) }
+        defer { close(fd) }
+        guard flock(fd, LOCK_EX) == 0 else { throw MoveError.system("locking the move log", errno) }
+        defer { flock(fd, LOCK_UN) }
+        return try body()
+    }
+
+    /// Appends one line and makes sure it's on the disk itself before returning: the entry
+    /// must exist before the file it describes is touched.
+    private func write(_ entry: JournalEntry) throws {
         var line = try Self.encoder.encode(entry)
         line.append(0x0A)
-        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        let fd = open(url.path, O_RDWR | O_APPEND | O_CREAT, 0o644)
+        let isNew = !FileManager.default.fileExists(atPath: url.path)
+        // Never follows a symlink: a planted link can't redirect the log.
+        let fd = open(url.path, O_RDWR | O_APPEND | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0o644)
         guard fd >= 0 else { throw MoveError.system("opening the move log", errno) }
         defer { close(fd) }
         // A line cut short by a crash has no newline; start on a fresh line so this entry
@@ -94,10 +114,12 @@ public struct MoveJournal: Sendable {
         if fstat(fd, &info) == 0, info.st_size > 0, pread(fd, &last, 1, info.st_size - 1) == 1, last != 0x0A {
             line.insert(0x0A, at: 0)
         }
-        let written = line.withUnsafeBytes { write(fd, $0.baseAddress, line.count) }
+        let written = line.withUnsafeBytes { Darwin.write(fd, $0.baseAddress, line.count) }
         guard written == line.count else { throw MoveError.system("writing the move log", errno) }
-        // fsync: the entry is on disk before we touch the file it describes.
-        fsync(fd)
+        // F_FULLFSYNC: on the disk, not in the drive's cache. If it can't be, nothing moves.
+        guard Durability.flush(fd: fd) else { throw MoveError.system("saving the move log to disk", errno) }
+        // A new log's own name must survive a power cut too.
+        if isNew { try Durability.flush(url.deletingLastPathComponent()) }
     }
 
     /// Every readable entry, oldest first. A line that can't be read (cut short by a power
@@ -133,6 +155,16 @@ public struct MoveJournal: Sendable {
                     createdFolders: entry.createdFolders ?? [], reason: entry.reason,
                     decidedBy: entry.decidedBy, state: .pending)
             case .moveDone:
+                if byID[entry.moveID] == nil {
+                    // Its "pending" line was damaged; "done" carries the same details.
+                    order.append(entry.moveID)
+                    byID[entry.moveID] = MoveRecord(
+                        moveID: entry.moveID, batchID: entry.batchID, time: entry.time,
+                        originalPath: entry.from, movedPath: entry.to, sha256: entry.sha256,
+                        tagsBefore: entry.tagsBefore ?? [], tagsAfter: entry.tagsAfter ?? [],
+                        createdFolders: entry.createdFolders ?? [], reason: entry.reason,
+                        decidedBy: entry.decidedBy, state: .moved)
+                }
                 byID[entry.moveID]?.state = .moved
                 if let tags = entry.tagsAfter { byID[entry.moveID]?.tagsAfter = tags }
             case .moveFailed:
@@ -154,28 +186,51 @@ public struct MoveJournal: Sendable {
     /// actually is, and logs the outcome. Returns how many were settled.
     @discardableResult
     public func recover() throws -> Int {
-        let fm = FileManager.default
-        var settled = 0
-        for record in try records() {
-            let event: JournalEntry.Event
-            switch record.state {
-            case .pending:
-                // The move happened if the file is at the destination and not at the source.
-                event = fm.fileExists(atPath: record.movedPath) && !fm.fileExists(atPath: record.originalPath)
-                    ? .moveDone : .moveFailed
-            case .undoPending:
-                let back = record.restoredPath ?? record.originalPath
-                event = fm.fileExists(atPath: back) && !fm.fileExists(atPath: record.movedPath) ? .undoDone : .undoFailed
-            default:
-                continue
+        try locked {
+            var settled = 0
+            for record in try records() {
+                guard let (event, message) = settle(record) else { continue }
+                try write(JournalEntry(event: event, time: Date(), moveID: record.moveID, batchID: record.batchID,
+                                       from: record.state == .pending ? record.originalPath : record.movedPath,
+                                       to: record.state == .pending ? record.movedPath : (record.restoredPath ?? record.originalPath),
+                                       message: message))
+                settled += 1
             }
-            try append(JournalEntry(event: event, time: Date(), moveID: record.moveID, batchID: record.batchID,
-                                    from: record.state == .pending ? record.originalPath : record.movedPath,
-                                    to: record.state == .pending ? record.movedPath : (record.restoredPath ?? record.originalPath),
-                                    message: "recovered after an interrupted run"))
-            settled += 1
+            return settled
         }
-        return settled
+    }
+
+    /// How an interrupted move or undo actually ended, judged by where the file is, after
+    /// finishing whatever was left half-done. nil for records that weren't interrupted.
+    private func settle(_ record: MoveRecord) -> (JournalEntry.Event, String)? {
+        let fm = FileManager.default
+        let note = "recovered after an interrupted run"
+        switch record.state {
+        case .pending:
+            let atDestination = fm.fileExists(atPath: record.movedPath)
+            let atSource = fm.fileExists(atPath: record.originalPath)
+            if atDestination && !atSource { return (.moveDone, note) }
+            if atDestination && atSource {
+                // A copy between disks stopped after copying, before removing the original.
+                // A complete copy finishes the move; anything else stays as it is, reported.
+                let source = URL(filePath: record.originalPath), copy = URL(filePath: record.movedPath)
+                if let a = try? SafeMove.manifest(source, FileHash.sha256),
+                   let b = try? SafeMove.manifest(copy, FileHash.sha256), a == b,
+                   (try? Durability.flushTree(copy)) != nil, (try? fm.removeItem(at: source)) != nil {
+                    return (.moveDone, "\(note): the copy was complete, so the move was finished")
+                }
+                return (.moveFailed, "\(note): an incomplete copy may be left at \(record.movedPath)")
+            }
+            return (.moveFailed, note)
+        case .undoPending:
+            let back = URL(filePath: record.restoredPath ?? record.originalPath)
+            guard fm.fileExists(atPath: back.path), !fm.fileExists(atPath: record.movedPath) else { return (.undoFailed, note) }
+            // Moved back, but maybe not cleaned up: tags, origin note, emptied folders.
+            let problems = Undoer.finish(record, at: back)
+            return (.undoDone, ([note] + problems).joined(separator: "; "))
+        default:
+            return nil
+        }
     }
 
     private static var encoder: JSONEncoder {

@@ -17,6 +17,16 @@ struct SensitiveFileRule: Rule {
                 alerts: found.map { Alert(.sensitive, "Inside \(facts.name): \($0)") }
             )
         }
+        // Too much inside to check every file (or too deep): it can't be called clean.
+        if let contents = facts.folder, contents.truncated {
+            return Decision(
+                destination: config.reviewFolder,
+                confidence: 1,
+                reason: "Folder too big to check every file for sensitive content",
+                source: .safety(name),
+                alerts: [Alert(.rejected, "\(facts.name) is too big to check fully for passwords, keys or recovery phrases; look through it yourself")]
+            )
+        }
         guard let finding = SensitiveDetector.check(facts) else { return nil }
 
         let label: String = switch finding.kind {

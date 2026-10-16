@@ -32,8 +32,10 @@ public enum FolderScan {
     public static let maxItems = 2_000
     static let sampleSize = 40
 
-    /// Counts, sizes and the newest change inside `folder`, plus the files found (for the
-    /// safety checks). Hidden items and the insides of bundles (.app, .photoslibrary) are skipped.
+    /// Counts, sizes and the newest change inside `folder`, plus the files found for the safety
+    /// checks. Hidden items (`.env`, `.ssh/id_rsa`) are among those files, since that's where
+    /// secrets hide, but don't count as contents. A `.git` history isn't read through (only its
+    /// `config`, which can hold a password); bundle insides (.app, .photoslibrary) are skipped.
     public static func scan(_ folder: URL) -> (contents: FolderContents, files: [URL]) {
         var contents = FolderContents()
         var files: [URL] = []
@@ -42,12 +44,14 @@ public enum FolderScan {
 
         let keys: [URLResourceKey] = [.isDirectoryKey, .isPackageKey, .fileSizeKey, .contentModificationDateKey]
         guard let walker = FileManager.default.enumerator(
-            at: folder, includingPropertiesForKeys: keys, options: [.skipsHiddenFiles, .skipsPackageDescendants])
+            at: folder, includingPropertiesForKeys: keys, options: [.skipsPackageDescendants])
         else { return (contents, files) }
 
         let base = folder.standardizedFileURL.path + "/"
+        var seen = 0
         for case let url as URL in walker {
-            if contents.fileCount + contents.folderCount >= maxItems {
+            seen += 1
+            if seen > maxItems {
                 contents.truncated = true
                 break
             }
@@ -57,12 +61,26 @@ public enum FolderScan {
                 continue
             }
             let values = try? url.resourceValues(forKeys: Set(keys))
-            if let changed = values?.contentModificationDate, changed > (contents.newestChange ?? .distantPast) {
+            let relative = String(url.standardizedFileURL.path.dropFirst(base.count))
+            let isFolder = values?.isDirectory == true && values?.isPackage != true
+            // Finder rewrites .DS_Store just from looking at a folder: not a change.
+            if url.lastPathComponent != ".DS_Store", let changed = values?.contentModificationDate,
+               changed > (contents.newestChange ?? .distantPast) {
                 contents.newestChange = changed
             }
-            let relative = String(url.standardizedFileURL.path.dropFirst(base.count))
+            if relative.split(separator: "/").contains(where: { $0.hasPrefix(".") }) {
+                // Hidden: checked for secrets, not counted as contents.
+                if isFolder, url.lastPathComponent == ".git" {
+                    walker.skipDescendants()
+                    let config = url.appending(path: "config")
+                    if FileManager.default.fileExists(atPath: config.path) { files.append(config) }
+                } else if !isFolder, url.lastPathComponent != ".DS_Store" {
+                    files.append(url)
+                }
+                continue
+            }
             paths.append(relative)
-            if values?.isDirectory == true && values?.isPackage != true {
+            if isFolder {
                 contents.folderCount += 1
             } else {
                 contents.fileCount += 1

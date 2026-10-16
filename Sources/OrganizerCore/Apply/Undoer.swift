@@ -74,21 +74,30 @@ public struct Undoer: Sendable {
             return result
         }
 
-        // Tags exactly as before, and no trace of the app on the file.
-        do { try FinderTags.writeRaw(record.tagsBefore, to: target) } catch { result.notes.append("tags not restored: \(error)") }
-        do { try MoveOrigin.remove(from: target) } catch { result.notes.append("origin note not removed: \(error)") }
-
-        // Folders this move created, innermost first. rmdir refuses non-empty folders,
-        // so anything you (or another move) put there keeps the folder alive.
-        for path in record.createdFolders.reversed() {
-            SafeMove.removeIfEmpty(URL(filePath: path))
-        }
+        result.notes += Self.finish(record, at: target)
 
         entry.event = .undoDone
         entry.time = Date()
         try? journal.append(entry)
         result.restoredTo = target
         return result
+    }
+}
+
+extension Undoer {
+    /// After the file is back: tags exactly as before, no trace of the app on it, and the
+    /// folders the move created removed if they're empty. Also used by recovery, when an undo
+    /// was interrupted after the file moved back. Returns what couldn't be done.
+    static func finish(_ record: MoveRecord, at target: URL) -> [String] {
+        var problems: [String] = []
+        do { try FinderTags.writeRaw(record.tagsBefore, to: target) } catch { problems.append("tags not restored: \(error)") }
+        do { try MoveOrigin.remove(from: target) } catch { problems.append("origin note not removed: \(error)") }
+        // Innermost first. rmdir refuses non-empty folders, so anything you (or another move)
+        // put there keeps the folder alive.
+        for path in record.createdFolders.reversed() {
+            SafeMove.removeIfEmpty(URL(filePath: path))
+        }
+        return problems
     }
 }
 

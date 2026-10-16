@@ -42,6 +42,36 @@ public enum SensitiveDetector {
         if facts.fileExtension == "conf", text.contains("[Interface]"), text.contains("PrivateKey") {
             return SensitiveFinding(kind: .credentialFile, detail: "WireGuard config with a private key")
         }
+        if let what = credentials(in: text, name: facts.name) {
+            return SensitiveFinding(kind: .credentialFile, detail: what)
+        }
+        return nil
+    }
+
+    /// Developer credential files, the kind found in downloaded projects and backups: what
+    /// matters is a secret value inside, not just the name.
+    static func credentials(in text: String, name: String) -> String? {
+        let lower = name.lowercased()
+        let content = text.lowercased()
+        if content.range(of: #"aws_secret_access_key\s*=\s*\S"#, options: .regularExpression) != nil {
+            return "AWS credentials (secret access key)"
+        }
+        if lower == ".git-credentials", text.range(of: #"https?://[^\s:/]+:[^\s@]+@"#, options: .regularExpression) != nil {
+            return "Git credentials (passwords or tokens in URLs)"
+        }
+        if [".netrc", "_netrc", ".pgpass"].contains(lower), content.contains("password") || lower == ".pgpass" {
+            return "\(name) with passwords"
+        }
+        if [".npmrc", ".pypirc", ".yarnrc.yml"].contains(lower),
+           content.range(of: #"(_authtoken|password|npmauthtoken)\s*[=:]\s*\S"#, options: .regularExpression) != nil {
+            return "\(name) with a token or password"
+        }
+        // .env, .env.local, .env.production (but not .env.example / .env.sample / .env.template).
+        if lower == ".env" || (lower.hasPrefix(".env.") && !["example", "sample", "template", "dist"].contains { lower.hasSuffix($0) }),
+           content.range(of: ##"(?m)^\s*(export\s+)?[a-z0-9_]*(secret|token|password|passwd|api_?key|private_?key)[a-z0-9_]*\s*=\s*['"]?[^\s'"#]"##,
+                         options: .regularExpression) != nil {
+            return "\(name) with secrets (keys, tokens or passwords)"
+        }
         return nil
     }
 
