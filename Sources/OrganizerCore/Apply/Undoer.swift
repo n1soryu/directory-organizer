@@ -62,9 +62,10 @@ public struct Undoer: Sendable {
         if fm.fileExists(atPath: target.path) {
             let ext = original.pathExtension
             let base = original.deletingPathExtension().lastPathComponent
-            guard let free = FileNames.clashAlternatives(base, ext, date: Date())
-                .map({ folder.appending(path: $0) })
-                .first(where: { !fm.fileExists(atPath: $0.path) }) else {
+            // The dated names first; if all are taken, a unique one (as when filing).
+            let names = FileNames.clashAlternatives(base, ext, date: Date())
+                + [FileNames.join("\(base) \(UUID().uuidString.prefix(8))", ext)]
+            guard let free = names.map({ folder.appending(path: $0) }).first(where: { !fm.fileExists(atPath: $0.path) }) else {
                 result.error = "no free name for \(original.lastPathComponent) in \(folder.path)"
                 return result
             }

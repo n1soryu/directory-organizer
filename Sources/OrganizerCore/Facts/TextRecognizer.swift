@@ -28,13 +28,11 @@ enum TextRecognizer {
             result = await attempt() ?? nil
         }
         guard let observations = result else { return nil }
-        // Reading order: top to bottom (Vision's y axis points up), then left to right.
+        // Lines top to bottom (Vision's y points up; centres rounded to 1% so a line's words
+        // share one), then left to right. A key per observation keeps the order consistent.
+        func line(_ o: RecognizedTextObservation) -> Int { Int((o.boundingBox.origin.y + o.boundingBox.height / 2) * 100) }
         return observations
-            .sorted {
-                abs($0.boundingBox.origin.y - $1.boundingBox.origin.y) > 0.01
-                    ? $0.boundingBox.origin.y > $1.boundingBox.origin.y
-                    : $0.boundingBox.origin.x < $1.boundingBox.origin.x
-            }
+            .sorted { line($0) != line($1) ? line($0) > line($1) : $0.boundingBox.origin.x < $1.boundingBox.origin.x }
             .compactMap { $0.topCandidates(1).first?.string }
             .joined(separator: "\n")
     }

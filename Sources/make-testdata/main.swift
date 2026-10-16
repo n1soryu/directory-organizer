@@ -4,7 +4,8 @@ import TestDataKit
 // Usage: make-testdata [folder]   (default: ./TestData)
 // Builds Downloads/ (fake downloads) and Home/ (a stand-in home folder) plus expected.json.
 
-let root = URL(filePath: CommandLine.arguments.dropFirst().first ?? "TestData", relativeTo: .currentDirectory())
+let root = URL(filePath: ((CommandLine.arguments.dropFirst().first ?? "TestData") as NSString).expandingTildeInPath,
+               relativeTo: .currentDirectory())
     .standardizedFileURL
 
 do {

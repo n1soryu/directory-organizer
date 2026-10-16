@@ -112,7 +112,7 @@ public enum FolderCatalog {
     }
 
     public static func newFolderParents(for kind: FileKind, inside: FolderContents? = nil) -> [String] {
-        if kind == .folder, let mostly = inside?.kindBytes.max(by: { $0.value < $1.value })?.key,
+        if kind == .folder, let mostly = inside?.kindBytes.max(by: { $0.value != $1.value ? $0.value < $1.value : $0.key > $1.key })?.key,
            let inner = FileKind(rawValue: mostly), inner != .folder {
             return newFolderParents(for: inner)
         }
@@ -129,11 +129,12 @@ public enum FolderCatalog {
         guard depth > 0 else { return [] }
         let url = homeRoot.appending(path: folder, directoryHint: .isDirectory)
         let children = (try? FileManager.default.contentsOfDirectory(
-            at: url, includingPropertiesForKeys: [.isDirectoryKey, .isPackageKey], options: [.skipsHiddenFiles])) ?? []
+            at: url, includingPropertiesForKeys: [.isDirectoryKey, .isPackageKey, .isSymbolicLinkKey], options: [.skipsHiddenFiles])) ?? []
         return children
             .filter {
-                let values = try? $0.resourceValues(forKeys: [.isDirectoryKey, .isPackageKey])
-                return values?.isDirectory == true && values?.isPackage != true
+                // A linked folder could lead outside your home: not a place files go.
+                let values = try? $0.resourceValues(forKeys: [.isDirectoryKey, .isPackageKey, .isSymbolicLinkKey])
+                return values?.isDirectory == true && values?.isPackage != true && values?.isSymbolicLink != true
             }
             .map { folder + "/" + $0.lastPathComponent }
             .sorted { $0.localizedStandardCompare($1) == .orderedAscending }

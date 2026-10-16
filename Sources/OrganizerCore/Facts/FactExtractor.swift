@@ -104,7 +104,8 @@ public struct FactExtractor: Sendable {
         }
 
         // Read plain text (CSV, notes, keys, files without an extension) for the safety checks.
-        if facts.text == nil, !isDirectory, facts.kind.isPlainText || facts.kind == .presentation {
+        let isLink = (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]))?.isSymbolicLink == true
+        if facts.text == nil, !isDirectory, !isLink, facts.kind.isPlainText || facts.kind == .presentation {
             if let text = Self.readPlainText(url, maxBytes: safetyScanBytes) {
                 // All of what was read is checked; the model only gets the start.
                 var whole = facts
@@ -137,7 +138,8 @@ public struct FactExtractor: Sendable {
         }
         for file in files.prefix(Self.maxFolderFilesChecked) {
             let inner = await self.facts(for: file)
-            let relative = String(file.standardizedFileURL.path.dropFirst(base.count))
+            let path = file.standardizedFileURL.path
+            let relative = path.hasPrefix(base) ? String(path.dropFirst(base.count)) : file.lastPathComponent
             if let finding = SensitiveDetector.check(inner) {
                 contents.sensitive.append("\(relative): \(finding.detail)")
             }

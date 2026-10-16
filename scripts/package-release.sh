@@ -9,6 +9,9 @@ cd "${0:A:h}/.."
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' Resources/Info.plist)"
 ZIP="build/Directory-Organizer-$VERSION.zip"
 
+# The (ad-hoc) signature must be intact, or macOS refuses to open the app.
+codesign --verify --deep --strict "build/Directory Organizer.app"
+
 rm -f "$ZIP"
 # ditto keeps the bundle's signature and metadata intact, unlike plain zip.
 ditto -c -k --keepParent "build/Directory Organizer.app" "$ZIP"

@@ -18,7 +18,10 @@ public enum DestinationValidator {
             if part.isEmpty { return "empty folder name in \"\(destination)\"" }
             if part == "." || part == ".." { return "\"..\" in \"\(destination)\"" }
             if part.hasPrefix(".") { return "hidden folder \"\(part)\"" }
-            if config.forbiddenComponents.contains(part) { return "protected folder \"\(part)\"" }
+            // APFS ignores case, so "library" is Library.
+            if config.forbiddenComponents.contains(where: { $0.caseInsensitiveCompare(part) == .orderedSame }) {
+                return "protected folder \"\(part)\""
+            }
             if let suffix = bundleSuffixes.first(where: { part.lowercased().hasSuffix($0) }) {
                 return "inside a \(suffix) bundle"
             }

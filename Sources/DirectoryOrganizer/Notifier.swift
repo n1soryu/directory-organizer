@@ -43,14 +43,16 @@ final class Notifier {
     }
 
     /// `page` is opened in the dashboard when you click the notification.
-    func send(title: String, body: String, page: AppModel.Page) async {
-        guard Self.isBundled, await status() == .allowed else { return }
+    /// True if the notification was handed to macOS to show.
+    @discardableResult
+    func send(title: String, body: String, page: AppModel.Page) async -> Bool {
+        guard Self.isBundled, await status() == .allowed else { return false }
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
         content.sound = .default
         content.userInfo = ["page": page.rawValue]
         let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
-        try? await UNUserNotificationCenter.current().add(request)
+        return (try? await UNUserNotificationCenter.current().add(request)) != nil
     }
 }

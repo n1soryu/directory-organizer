@@ -5,7 +5,7 @@ public struct SensitiveFinding: Codable, Equatable, Sendable {
     public enum Kind: String, Codable, Sendable {
         /// Passwords in plain text (CSV/JSON export). Goes to review so you can delete it.
         case unencryptedPasswordExport
-        /// 12-24 BIP-39 words in a row: a crypto wallet recovery phrase.
+        /// A crypto wallet recovery phrase: 12+ BIP-39 words in a row, or 11+ among 13.
         case recoveryPhrase
         /// "-----BEGIN ... PRIVATE KEY-----" and friends.
         case privateKey
@@ -104,7 +104,7 @@ public enum SensitiveDetector {
         switch facts.fileExtension {
         case "1pux", "1pif":
             SensitiveFinding(kind: .unencryptedPasswordExport, detail: "1Password export (.\(facts.fileExtension), not encrypted)")
-        case "kdbx", "keychain-db":
+        case "kdbx", "keychain-db", "keychain":
             SensitiveFinding(kind: .credentialFile, detail: "encrypted password database (.\(facts.fileExtension))")
         case "p12", "pfx", "ppk":
             SensitiveFinding(kind: .credentialFile, detail: "certificate or key bundle (.\(facts.fileExtension))")

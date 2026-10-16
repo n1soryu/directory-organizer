@@ -174,6 +174,8 @@ final class AppModel {
     /// Quick scans only see the folder, so they show these instead while they still apply.
     private var deepUnpacked: [String: [ProposedAction]] = [:]
     private var retryTask: Task<Void, Never>?
+    /// Auto-apply as it was in the sandbox, restored when switching back to it.
+    private var sandboxAutoApply: AutoApplyPolicy?
     /// What's known about your folders (purposes learned by Organize Now), kept on disk.
     private var profiles: [FolderProfile] = []
     var profileStore: ProfileStore { ProfileStore(forHome: homeURL) }
@@ -419,7 +421,8 @@ final class AppModel {
     /// Files the auto-apply settings allow, filed now. Returns the ones moved.
     private func autoApply() async -> Set<ProposedAction.ID> {
         let eligible = pending.filter(settings.autoApply.allows)
-        guard !eligible.isEmpty else { return [] }
+        // Not while you're applying or undoing something yourself; the next scan catches up.
+        guard !eligible.isEmpty, !isApplying else { return [] }
         let results = await apply(eligible, automatic: true)
         return Set(results.filter { $0.outcome == .moved }.map(\.action.id))
     }
@@ -428,13 +431,16 @@ final class AppModel {
 
     func approve(_ ids: Set<ProposedAction.ID>) {
         let actions = pending.filter { ids.contains($0.id) }
-        guard !actions.isEmpty else { return }
+        // One apply or undo at a time (a double-click mustn't start two).
+        guard !actions.isEmpty, !isApplying else { return }
+        isApplying = true
         Task { await apply(actions, automatic: false) }
     }
 
     func approveAll() { approve(Set(pending.map(\.id))) }
 
     func reject(_ ids: Set<ProposedAction.ID>) {
+        guard !isApplying else { return }
         let actions = pending.filter { ids.contains($0.id) }
         settings.rejected.append(contentsOf: actions.map(FileIdentity.init))
         pending.removeAll { ids.contains($0.id) }
@@ -445,6 +451,7 @@ final class AppModel {
 
     /// Puts rejected files back into the plan.
     func reconsider(_ ids: Set<ProposedAction.ID>) {
+        guard !isApplying else { return }
         let actions = rejected.filter { ids.contains($0.id) }
         let identities = Set(actions.map(FileIdentity.init))
         settings.rejected.removeAll { identities.contains($0) }
@@ -454,7 +461,7 @@ final class AppModel {
 
     @discardableResult
     private func apply(_ actions: [ProposedAction], automatic: Bool) async -> [ApplyResult] {
-        guard !isLocked else { return [] }
+        guard !isLocked else { isApplying = false; return [] }
         isApplying = true
         let applier = Applier(homeRoot: homeURL, journal: journal)
         let results = await Task.detached { applier.apply(actions) }.value
@@ -487,7 +494,7 @@ final class AppModel {
 
     func undo(_ moves: [MoveRecord]) {
         let undoable = moves.filter { $0.state == .moved }
-        guard !undoable.isEmpty, !isLocked else { return }
+        guard !undoable.isEmpty, !isLocked, !isApplying else { return }
         let undoer = Undoer(journal: journal)
         isApplying = true
         Task {
@@ -593,6 +600,7 @@ final class AppModel {
         organizeTask?.cancel()
         let real = AppSettings.real()
         settings.realUseSince = Date()
+        sandboxAutoApply = settings.autoApply
         settings.autoApply.enabled = []
         settings.rejected = []
         deepResults = [:]
@@ -608,6 +616,7 @@ final class AppModel {
         let sandbox = AppSettings()
         settings.realUseSince = nil
         settings.rejected = []
+        if let saved = sandboxAutoApply { settings.autoApply = saved }
         deepResults = [:]
         deepUnpacked = [:]
         log(.info, "Switched back to the sandbox")
@@ -631,12 +640,14 @@ final class AppModel {
         let due = ReviewReminder.isDue(itemCount: reviewItems.count, lastSent: settings.lastReviewReminder,
                                        interval: settings.reviewReminderHours * 3600)
         guard force || due, !reviewItems.isEmpty else { return }
-        settings.lastReviewReminder = Date()
         let count = reviewItems.count
         log(.info, "Review reminder: \(count) item\(count == 1 ? "" : "s") waiting")
-        await notifier.send(title: "\(count) item\(count == 1 ? "" : "s") in To Delete (Review)",
-                            body: "Installers, duplicates, code projects and unsure files are waiting for you to check.",
-                            page: .review)
+        // Only a reminder that was shown counts (not one blocked by notification settings).
+        if await notifier.send(title: "\(count) item\(count == 1 ? "" : "s") in To Delete (Review)",
+                               body: "Installers, duplicates, code projects and unsure files are waiting for you to check.",
+                               page: .review) {
+            settings.lastReviewReminder = Date()
+        }
     }
 
     func requestNotificationPermission() {

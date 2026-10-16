@@ -189,7 +189,7 @@ public struct AppleClassifier: FileClassifier {
 
     /// One fresh session per question, so files don't influence each other. Greedy sampling
     /// gives the same answer for the same file every time. If the text doesn't fit the
-    /// context window, retries once with a shorter excerpt.
+    /// context window, tries again with shorter excerpts (a third each time, down to 500 characters).
     private func respond(instructions: String, schema: GenerationSchema,
                          prompt: (Int) -> Prompt) async throws -> GeneratedContent {
         var limit = textLimit

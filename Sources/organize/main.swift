@@ -160,6 +160,8 @@ case "apply":
 
     let results = Applier(homeRoot: home, journal: journal(for: home)).apply(approved)
     printer.print(results, home: home)
+    // Scripts can tell: not everything approved was moved.
+    if results.contains(where: { $0.outcome != .moved }) { exit(1) }
 
 case "undo":
     let arguments = Arguments(args)
@@ -174,6 +176,9 @@ case "undo":
         chosen = candidates.filter { $0.batchID == last.batchID }
     } else if let batch = arguments.values["--batch"] {
         chosen = candidates.filter { $0.batchID.uuidString.lowercased().hasPrefix(batch.lowercased()) }
+        // A prefix that fits several batches would undo more than you meant.
+        let batches = Set(chosen.map(\.batchID))
+        guard batches.count <= 1 else { fail("\(batch) matches \(batches.count) batches; give more of the id (see `organize log`)") }
     } else if let name = arguments.positional.first {
         // Match the current name or the original name.
         chosen = candidates.filter {
@@ -201,7 +206,10 @@ case "model":
     }
 
 case "facts":
-    guard let file = args.first.map(path) else { fail("which file?") }
+    let arguments = Arguments(args)
+    guard arguments.flags.isEmpty, arguments.positional.count == 1, let file = arguments.positional.first.map(path) else {
+        fail("which file? (one file, no options)")
+    }
     refuseRealFolders(file.deletingLastPathComponent())
     let facts = await FactExtractor().facts(for: file)
     print(String(decoding: try encoder().encode(facts), as: UTF8.self))

@@ -28,7 +28,7 @@ struct PlanPrinter {
                     ? "\(action.originalName) \(dim("→")) \(cyan(action.finalName))"
                     : action.originalName
                 Swift.print("   \(name)")
-                var details = [String(format: "%3d%%", Int((action.confidence * 100).rounded()))]
+                var details = [String(format: "%3ld%%", Int((action.confidence * 100).rounded()))]
                 if !action.tags.isEmpty { details.append(action.tags.map(\.name).joined(separator: ", ")) }
                 details.append(action.decidedBy.description)
                 details.append(action.reason)
@@ -141,7 +141,7 @@ struct PlanPrinter {
         switch kind {
         case .sensitive: "🔐"
         case .duplicate: "♊️"
-        case .nameClash: "⚠️ "
+        case .nameClash: "⚠️"
         case .unknownCourse: "❓"
         case .rejected: "⛔️"
         }

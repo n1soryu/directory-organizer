@@ -10,7 +10,7 @@ public struct FolderProfile: Codable, Sendable, Equatable {
     public var purpose: String?
     /// Visible files directly inside.
     public var fileCount: Int
-    /// Files of each kind ("pdf document" → 12).
+    /// Files of each kind, by `FileKind` raw value ("pdf" → 12).
     public var kinds: [String: Int]
     /// Names of the most recently added files, newest first.
     public var examples: [String]
@@ -91,7 +91,7 @@ public enum FolderProfiler {
                 guard values?.isRegularFile == true || values?.isPackage == true else { return nil }
                 return (item, values?.addedToDirectoryDate ?? values?.creationDate ?? .distantPast)
             }
-            .sorted { $0.1 > $1.1 }
+            .sorted { $0.1 != $1.1 ? $0.1 > $1.1 : $0.0.lastPathComponent < $1.0.lastPathComponent }
             .map(\.0)
 
         var profile = FolderProfile(path: path, fileCount: files.count)

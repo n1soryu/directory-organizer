@@ -84,4 +84,23 @@ import Testing
         #expect(why.contains("Finder tags"))
         #expect(FileManager.default.fileExists(atPath: source.path))
     }
+
+    /// LOW-22: APFS ignores case, so "library" is Library.
+    @Test func protectedFoldersInAnyCase() {
+        #expect(DestinationValidator.problem(with: "Documents/library/x", config: OrganizerConfig()) != nil)
+    }
+
+    /// LOW-25: empty files are all "identical"; that's not a duplicate.
+    @Test func anEmptyFileIsNotADuplicateOfAnotherEmptyFile() async throws {
+        let fm = FileManager.default
+        try fm.createDirectory(at: root.appending(path: "Downloads"), withIntermediateDirectories: true)
+        try fm.createDirectory(at: root.appending(path: "Home/Documents/Notes"), withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: root) }
+        try Data().write(to: root.appending(path: "Home/Documents/Notes/old.txt"))
+        try Data().write(to: root.appending(path: "Downloads/new.txt"))
+        var planner = Planner(homeRoot: root.appending(path: "Home"))
+        planner.classifier = Answer(destination: "Documents/Notes", confidence: 0.9)
+        let action = try #require(try await planner.plan(folder: root.appending(path: "Downloads")).actions.first)
+        #expect(!action.alerts.contains { $0.kind == .duplicate })
+    }
 }

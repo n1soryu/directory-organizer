@@ -165,7 +165,8 @@ public struct Planner: Sendable {
         progress?(Progress(done: facts.count, total: facts.count, file: "", step: .deciding))
 
         var plan = Plan(createdAt: Date(), inputFolder: folder, homeRoot: homeRoot, actions: actions,
-                        skipped: skipped, waiting: waiting)
+                        skipped: skipped.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending },
+                        waiting: waiting)
         plan.unpacked = unpacked
         plan.profiles = learned
         return plan
@@ -301,8 +302,12 @@ public struct Planner: Sendable {
                 result.append(item)
                 continue
             }
-            let children = (try? FileManager.default.contentsOfDirectory(
-                at: item.url, includingPropertiesForKeys: [.addedToDirectoryDateKey], options: [.skipsHiddenFiles])) ?? []
+            // Can't list it after all: it stays one item rather than vanishing from the plan.
+            guard let children = try? FileManager.default.contentsOfDirectory(
+                at: item.url, includingPropertiesForKeys: [.addedToDirectoryDateKey], options: [.skipsHiddenFiles]) else {
+                result.append(item)
+                continue
+            }
             var inside: [FileFacts] = []
             for child in children where !Self.incompleteExtensions.contains(child.pathExtension.lowercased()) {
                 inside.append(await extractor.facts(for: child))
@@ -316,8 +321,8 @@ public struct Planner: Sendable {
     /// When an item arrived in its folder: the date it was added, else when it was created.
     /// nil (unknown) counts as old, so nothing is touched by mistake.
     static func arrival(of url: URL) -> Date? {
-        let values = try? url.resourceValues(forKeys: [.addedToDirectoryDateKey, .creationDateKey])
-        return values?.addedToDirectoryDate ?? values?.creationDate
+        let values = try? url.resourceValues(forKeys: [.addedToDirectoryDateKey, .creationDateKey, .contentModificationDateKey])
+        return values?.addedToDirectoryDate ?? values?.creationDate ?? values?.contentModificationDate
     }
 
     /// Quick scans: why a file has to wait for a full run, or nil if rules can decide it now.
@@ -560,6 +565,7 @@ public struct Planner: Sendable {
         var safe = decision
         safe.destination = config.reviewFolder
         safe.tags = []
+        safe.newBaseName = nil
         safe.reason = "Rejected \(decision.destination): \(problem)"
         safe.alerts.append(Alert(.rejected, "Proposed destination rejected: \(problem)"))
         return safe
@@ -636,7 +642,9 @@ public struct Planner: Sendable {
         guard let candidates = try? FileManager.default.contentsOfDirectory(
             at: dir, includingPropertiesForKeys: [.fileSizeKey, .isRegularFileKey], options: [.skipsHiddenFiles])
         else { return nil }
-        for candidate in candidates {
+        // Empty files are all "identical"; that says nothing (as within a batch).
+        guard facts.size > 0 else { return nil }
+        for candidate in candidates where candidate.standardizedFileURL != facts.url.standardizedFileURL {
             let values = try? candidate.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey])
             guard values?.isRegularFile == true, Int64(values?.fileSize ?? -1) == facts.size,
                   let a = hashes.hash(facts.url), let b = hashes.hash(candidate), a == b else { continue }
@@ -675,12 +683,13 @@ public struct Planner: Sendable {
 
 /// Hashes each file at most once per plan.
 struct HashCache {
-    private var cache: [URL: String] = [:]
+    /// nil inside: hashing failed, so it isn't tried again for every candidate.
+    private var cache: [URL: String?] = [:]
 
     mutating func hash(_ url: URL) -> String? {
         if let known = cache[url] { return known }
-        guard let value = try? FileHash.sha256(url) else { return nil }
-        cache[url] = value
+        let value = try? FileHash.sha256(url)
+        cache[url] = .some(value)
         return value
     }
 }

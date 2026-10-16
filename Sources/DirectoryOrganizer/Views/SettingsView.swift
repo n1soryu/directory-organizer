@@ -35,7 +35,7 @@ struct SettingsView: View {
                     Button(model.display(model.journal.url.path)) { model.reveal(model.journal.url) }.buttonStyle(.link)
                 }
                 LabeledContent("Settings file") {
-                    Button(model.display(AppSettings.defaultURL.path)) { model.reveal(AppSettings.defaultURL) }.buttonStyle(.link)
+                    Button(model.display(AppModel.settingsURL.path)) { model.reveal(AppModel.settingsURL) }.buttonStyle(.link)
                 }
                 if !model.isRealUseOn {
                     Button("Reset to the Sandbox Folders") {
