@@ -46,29 +46,37 @@ public enum MediaNameCleaner {
 
         var titleWords: [String] = []
         var result = MediaName(title: "")
-        for (index, word) in words.enumerated() {
-            let lower = word.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "()-"))
-
-            if let (season, episode) = episodeMarker(lower) {
+        let lowered = words.map { $0.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "()-")) }
+        for (index, lower) in lowered.enumerated() {
+            let next = index + 1 < lowered.count ? lowered[index + 1] : nil
+            // "S01E04", "1x04", or "S01 E04" split in two (from "Show.S01.E04").
+            if let (season, episode) = episodeMarker(lower) ?? next.flatMap({ splitEpisodeMarker(lower, $0) }) {
                 result.season = season
                 result.episode = episode
                 break
             }
-            // A year ends the title, unless it IS the start of the title ("2001 A Space Odyssey").
-            if index > 0, let year = Int(lower), (1920...2049).contains(year), lower.count == 4 {
+            // A year ends the title when it's in parentheses, or release words (or another year)
+            // follow it, and isn't the title's first word: "Dune (2024)", "Blade Runner 2049 2017
+            // 1080p" (2049 is title), "2001 A Space Odyssey".
+            if index > 0, let year = asYear(lower),
+               words[index].hasPrefix("(")
+                || next.map({ isReleaseToken($0) || asYear($0) != nil || episodeMarker($0) != nil }) ?? false {
                 result.year = year
                 break
             }
             if isReleaseToken(lower) { break }
-            titleWords.append(word)
+            titleWords.append(words[index])
         }
 
         var title = titleWords.joined(separator: " ")
             .trimmingCharacters(in: CharacterSet(charactersIn: " -()"))
         if title.isEmpty { title = FileNames.humanize(baseName) }
-        // All-lowercase or ALL-CAPS titles read better in title case.
-        if title == title.lowercased() || title == title.uppercased() {
+        // All-lowercase or ALL-CAPS titles read better in title case; short words in an
+        // ALL-CAPS title are likely acronyms ("CSI MIAMI" → "CSI Miami").
+        if title == title.lowercased() {
             title = title.capitalized
+        } else if title == title.uppercased() {
+            title = title.split(separator: " ").map { $0.count <= 3 ? String($0) : $0.capitalized }.joined(separator: " ")
         }
         result.title = title
         return result
@@ -89,10 +97,26 @@ public enum MediaNameCleaner {
         return word.range(of: #"^(ddp?|aac|ac3|eac3|dts|truehd)\d"#, options: .regularExpression) != nil
     }
 
+    /// A plausible release year: 1920 to next year.
+    private static func asYear(_ word: String) -> Int? {
+        guard word.count == 4, let year = Int(word) else { return nil }
+        let thisYear = Calendar(identifier: .gregorian).component(.year, from: Date())
+        return (1920...thisYear + 1).contains(year) ? year : nil
+    }
+
+    /// "s01" followed by "e04".
+    private static func splitEpisodeMarker(_ word: String, _ next: String) -> (Int, Int)? {
+        guard word.count <= 3, next.count <= 4, word.first == "s", next.first == "e",
+              let season = Int(word.dropFirst()), let episode = Int(next.dropFirst()) else { return nil }
+        return (season, episode)
+    }
+
+    private static let episodePatterns = [#"^s(\d{1,2})e(\d{1,3})$"#, #"^(\d{1,2})x(\d{2})$"#]
+        .map { try! NSRegularExpression(pattern: $0) }   // fixed patterns: compiled once
+
     /// "s01e04", "s1e4", "1x04".
     private static func episodeMarker(_ word: String) -> (Int, Int)? {
-        for pattern in [#"^s(\d{1,2})\s?e(\d{1,3})$"#, #"^(\d{1,2})x(\d{2})$"#] {
-            let regex = try! NSRegularExpression(pattern: pattern)
+        for regex in episodePatterns {
             let ns = word as NSString
             if let m = regex.firstMatch(in: word, range: NSRange(location: 0, length: ns.length)),
                let s = Int(ns.substring(with: m.range(at: 1))), let e = Int(ns.substring(with: m.range(at: 2))) {

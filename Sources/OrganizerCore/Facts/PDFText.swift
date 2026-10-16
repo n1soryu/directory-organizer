@@ -8,12 +8,18 @@ enum PDFText {
         var text: String
         var pageCount: Int
         var title: String?
+        /// Password-protected: nothing could be read, which isn't the same as "no text".
+        var isLocked = false
     }
+
+    /// The biggest page image rendered for OCR, in pixels per side. Page sizes come from the
+    /// file and can be absurd (or not numbers at all) in a broken or hostile PDF.
+    static let maxRenderSide: CGFloat = 6_000
 
     static func read(_ url: URL, maxPages: Int, limit: Int) -> Result? {
         guard let document = PDFDocument(url: url) else { return nil }
         guard !document.isLocked else {
-            return Result(text: "", pageCount: document.pageCount, title: nil)
+            return Result(text: "", pageCount: document.pageCount, title: nil, isLocked: true)
         }
         var text = ""
         for index in 0..<min(maxPages, document.pageCount) {
@@ -32,7 +38,9 @@ enum PDFText {
         return (0..<min(maxPages, document.pageCount)).compactMap { index in
             guard let page = document.page(at: index) else { return nil }
             let bounds = page.bounds(for: .mediaBox)
-            let width = Int(bounds.width * scale), height = Int(bounds.height * scale)
+            guard bounds.width.isFinite, bounds.height.isFinite, bounds.width > 0, bounds.height > 0 else { return nil }
+            let scale = min(scale, maxRenderSide / max(bounds.width, bounds.height))
+            let width = Int((bounds.width * scale).rounded()), height = Int((bounds.height * scale).rounded())
             guard width > 0, height > 0, let context = CGContext(
                 data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
                 space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue

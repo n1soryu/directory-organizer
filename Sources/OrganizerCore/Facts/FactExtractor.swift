@@ -7,8 +7,9 @@ public struct FactExtractor: Sendable {
     public var textLimit = 4_000
     /// Files with unclear names are read more deeply, since the content is all we have.
     public var deepTextLimit = 8_000
-    /// Plain-text files bigger than this aren't read (logs, data dumps).
-    public var maxPlainTextBytes = 512 * 1024
+    /// How much of a text file is checked for secrets, whatever its size: a password export or a
+    /// key past the excerpt kept for the model is still found.
+    public var safetyScanBytes = 256 * 1024
     /// Text recognition (OCR) for images and scanned PDFs. The slow part; off for quick scans.
     public var recognizeText = true
 
@@ -55,6 +56,8 @@ public struct FactExtractor: Sendable {
                     facts.setText(office.text, source: .office)
                     facts.documentTitle = office.title
                 } catch {
+                    // Unread is not clean: it can't be checked for sensitive text.
+                    facts.needsDeepRead = true
                     facts.notes.append("Couldn't read Office text: \(error)")
                 }
             }
@@ -89,9 +92,18 @@ public struct FactExtractor: Sendable {
         }
 
         // Read plain text (CSV, notes, keys, files without an extension) for the safety checks.
-        if facts.text == nil, !isDirectory, facts.kind.isPlainText || facts.kind == .presentation,
-           facts.size <= maxPlainTextBytes, let text = Self.readPlainText(url, limit: limit) {
-            facts.setText(text, source: .content)
+        if facts.text == nil, !isDirectory, facts.kind.isPlainText || facts.kind == .presentation {
+            if let text = Self.readPlainText(url, maxBytes: safetyScanBytes) {
+                // All of what was read is checked; the model only gets the start.
+                var whole = facts
+                whole.text = text
+                facts.sensitive = SensitiveDetector.check(whole)
+                facts.setText(String(text.prefix(limit)), source: .content)
+            } else if [.csv, .text, .code].contains(facts.kind), facts.size > 0 {
+                // Meant to be text but isn't readable as text: can't be checked.
+                facts.needsDeepRead = true
+                facts.notes.append("Couldn't read it as text")
+            }
         }
         return facts
     }
@@ -132,7 +144,14 @@ public struct FactExtractor: Sendable {
     private func readPDF(into facts: inout FileFacts, limit: Int) async {
         let maxPages = facts.nameIsUnclear ? 3 : 2
         guard let pdf = PDFText.read(facts.url, maxPages: maxPages, limit: limit) else {
+            facts.needsDeepRead = true
             facts.notes.append("Couldn't open PDF")
+            return
+        }
+        guard !pdf.isLocked else {
+            facts.pageCount = pdf.pageCount
+            facts.needsDeepRead = true
+            facts.notes.append("PDF is password-protected")
             return
         }
         facts.pageCount = pdf.pageCount
@@ -145,8 +164,14 @@ public struct FactExtractor: Sendable {
                 facts.needsDeepRead = true
                 return
             }
+            let pages = PDFText.renderPages(facts.url, maxPages: maxPages)
+            if pages.isEmpty, pdf.pageCount > 0 {
+                facts.needsDeepRead = true
+                facts.notes.append("Couldn't render the pages to read them")
+                return
+            }
             var ocr = ""
-            for page in PDFText.renderPages(facts.url, maxPages: maxPages) {
+            for page in pages {
                 guard let text = await TextRecognizer.text(in: page) else {
                     facts.needsDeepRead = true
                     facts.notes.append("Text recognition failed")
@@ -158,17 +183,31 @@ public struct FactExtractor: Sendable {
         }
     }
 
-    /// The start of a file, if it's UTF-8 text (binary files return nil).
-    static func readPlainText(_ url: URL, limit: Int) -> String? {
+    /// The start of a file as text (UTF-8, or UTF-16 by its byte-order mark or its shape), or
+    /// nil for binary files.
+    static func readPlainText(_ url: URL, maxBytes: Int) -> String? {
         guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
         defer { try? handle.close() }
-        guard let data = try? handle.read(upToCount: limit * 4), !data.isEmpty,
-              !data.contains(0) else { return nil }
+        guard let data = try? handle.read(upToCount: maxBytes), !data.isEmpty else { return nil }
+        let bytes = [UInt8](data.prefix(64))
+        if bytes.starts(with: [0xFF, 0xFE]) || bytes.starts(with: [0xFE, 0xFF]) {
+            return String(data: data.count % 2 == 0 ? data : data.dropLast(), encoding: .utf16)
+        }
+        // UTF-16 without a mark: ASCII-range text with every other byte zero.
+        if bytes.count >= 8, bytes.count % 2 == 0 {
+            let odd = stride(from: 1, to: bytes.count, by: 2).map { bytes[$0] }
+            let even = stride(from: 0, to: bytes.count, by: 2).map { bytes[$0] }
+            if odd.allSatisfy({ $0 == 0 }), even.allSatisfy({ $0 != 0 }) {
+                return String(data: data.count % 2 == 0 ? data : data.dropLast(), encoding: .utf16LittleEndian)
+            }
+            if even.allSatisfy({ $0 == 0 }), odd.allSatisfy({ $0 != 0 }) {
+                return String(data: data.count % 2 == 0 ? data : data.dropLast(), encoding: .utf16BigEndian)
+            }
+        }
+        guard !data.contains(0) else { return nil }
         // Cutting at a byte limit can split a multi-byte character; drop the partial tail.
         for trim in 0...3 where data.count > trim {
-            if let text = String(data: data.dropLast(trim), encoding: .utf8) {
-                return String(text.prefix(limit))
-            }
+            if let text = String(data: data.dropLast(trim), encoding: .utf8) { return text }
         }
         return nil
     }

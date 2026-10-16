@@ -23,8 +23,25 @@ public final class FolderWatcher: @unchecked Sendable {
     @discardableResult
     public func start() -> Bool {
         stop()
+        // FSEvents would happily watch a path that doesn't exist (and never report anything).
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory), isDirectory.boolValue else {
+            return false
+        }
+        // The stream keeps the watcher alive (retain/release), so an event delivered late can't
+        // reach a watcher that's gone. Call `stop()` to let go of it.
         var context = FSEventStreamContext(
-            version: 0, info: Unmanaged.passUnretained(self).toOpaque(), retain: nil, release: nil, copyDescription: nil)
+            version: 0, info: Unmanaged.passUnretained(self).toOpaque(),
+            retain: { info in
+                guard let info else { return nil }
+                _ = Unmanaged<FolderWatcher>.fromOpaque(info).retain()
+                return info
+            },
+            release: { info in
+                guard let info else { return }
+                Unmanaged<FolderWatcher>.fromOpaque(info).release()
+            },
+            copyDescription: nil)
         let callback: FSEventStreamCallback = { _, info, _, _, _, _ in
             guard let info else { return }
             Unmanaged<FolderWatcher>.fromOpaque(info).takeUnretainedValue().onChange()

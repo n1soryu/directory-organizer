@@ -319,6 +319,7 @@ public struct Planner: Sendable {
         // Checked before other rules: an unread image could hold a recovery phrase.
         if facts.needsDeepRead {
             if facts.isDirectory { return "has images or scans inside that need text recognition" }
+            if let why = facts.notes.last { return why.prefix(1).lowercased() + why.dropFirst() }
             return facts.kind == .image ? "needs text recognition (could contain sensitive text)" : "scanned pages need text recognition"
         }
         guard ruled == nil else { return nil }
@@ -339,10 +340,11 @@ public struct Planner: Sendable {
         // text, so it isn't filed anywhere but review (unless something sensitive was found).
         if mode == .full, facts.needsDeepRead {
             if let ruled, case .safety = ruled.source { return checked(ruled) }
+            let why = facts.notes.last ?? "Couldn't read its text"
             return Decision(destination: config.reviewFolder, confidence: 0,
-                            reason: "Couldn't read the text in it, so it couldn't be checked for sensitive content",
+                            reason: "\(why), so it couldn't be checked for sensitive content",
                             source: .safety("unreadable"),
-                            alerts: [Alert(.rejected, "Text recognition failed; check it yourself")])
+                            alerts: [Alert(.rejected, "\(why); check it yourself")])
         }
         if var decision = ruled {
             decision = checked(decision)

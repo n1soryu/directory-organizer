@@ -40,9 +40,18 @@ func facts(name: String, text: String?, kind: FileKind? = nil) -> FileFacts {
         #expect(finding?.belongsInReview == false)
     }
 
-    @Test func elevenWordsAreNotAPhrase() {
-        let text = BIP39.orderedWords.prefix(11).joined(separator: " ")
+    @Test func tenWordsAreNotAPhrase() {
+        let text = BIP39.orderedWords.prefix(10).joined(separator: " ")
         #expect(SensitiveDetector.check(facts(name: "a.txt", text: text)) == nil)
+    }
+
+    /// Text recognition misread one word of twelve (and split it in two).
+    @Test func aPhraseWithOneMisreadWordIsStillCaught() {
+        var words = Array(BIP39.orderedWords.shuffled().prefix(12))
+        words[5] = "wa11xq"
+        let text = "Wallet backup\n" + words.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: "\n")
+        #expect(SensitiveDetector.longestRecoveryPhraseRun(in: text) ?? 0 < 12)
+        #expect(SensitiveDetector.check(facts(name: "IMG_2.jpg", text: text))?.kind == .recoveryPhrase)
     }
 
     @Test func proseIsNotAPhrase() {

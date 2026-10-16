@@ -7,6 +7,20 @@ public struct FileIdentity: Codable, Hashable, Sendable {
     public var size: Int64
     public var modified: Date?
 
+    /// Dates count to the whole second: settings store whole seconds, and a rejection saved
+    /// yesterday must still match the same, unchanged file today.
+    private var second: Int64? { modified.map { Int64($0.timeIntervalSince1970.rounded(.down)) } }
+
+    public static func == (a: FileIdentity, b: FileIdentity) -> Bool {
+        a.path == b.path && a.size == b.size && a.second == b.second
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(path)
+        hasher.combine(size)
+        hasher.combine(second)
+    }
+
     public init(_ action: ProposedAction) {
         path = action.source.path
         size = action.sourceSize

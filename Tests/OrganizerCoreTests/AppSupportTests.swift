@@ -53,6 +53,21 @@ import Testing
         #expect(AppSettings.load(from: file.appending(path: "missing")) == AppSettings())
     }
 
+    /// HIGH-4: a rejection saved to disk must still match the unchanged file after a relaunch.
+    @Test func aSavedRejectionStillMatchesTheFile() throws {
+        let file = FileManager.default.temporaryDirectory.appending(path: "settings-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: file) }
+        let precise = Date(timeIntervalSince1970: 1_800_000_000.734)   // file dates have fractions
+        let identity = FileIdentity(path: "/tmp/x.pdf", size: 10, modified: precise)
+        var settings = AppSettings(watchedFolder: "/tmp/in", homeRoot: "/tmp/home")
+        settings.rejected = [identity]
+        try settings.save(to: file)
+        let reloaded = AppSettings.load(from: file).rejected
+        #expect(reloaded.first?.modified != precise)          // the seconds-only format loses it…
+        #expect(Set(reloaded).contains(identity))              // …but it's the same file
+        #expect(identity != FileIdentity(path: "/tmp/x.pdf", size: 10, modified: precise.addingTimeInterval(1)))
+    }
+
     @Test func settingsFromOlderVersionsStillLoad() throws {
         let file = FileManager.default.temporaryDirectory.appending(path: "settings-\(UUID().uuidString).json")
         defer { try? FileManager.default.removeItem(at: file) }
@@ -107,10 +122,7 @@ import Testing
 
     @Test func refusesAMissingFolder() {
         let watcher = FolderWatcher(url: URL(filePath: "/nonexistent-\(UUID().uuidString)")) {}
-        // FSEvents accepts paths that don't exist yet; what matters is that nothing crashes
-        // and stopping is safe.
-        _ = watcher.start()
-        watcher.stop()
+        #expect(!watcher.start())
         #expect(!watcher.isRunning)
     }
 }

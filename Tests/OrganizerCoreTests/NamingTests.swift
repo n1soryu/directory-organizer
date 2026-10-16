@@ -27,6 +27,10 @@ import Testing
         ("Avengers_Infinity_War_4K_BluRay", "Avengers Infinity War"),
         ("The.Matrix.1999.1080p.BluRay.x264-YIFY", "The Matrix (1999)"),
         ("Severance.S01E04.1080p.WEB-DL.x265-GROUP", "Severance S01E04"),
+        ("Severance.S01.E04.1080p.WEB-DL", "Severance S01E04"),           // marker split by a dot
+        ("Blade.Runner.2049.2017.1080p.BluRay", "Blade Runner 2049 (2017)"), // 2049 is title
+        ("Blade Runner 2049", "Blade Runner 2049"),
+        ("CSI.MIAMI.S02E05.720p", "CSI Miami S02E05"),
         ("the.office.us.s02e01.720p.hdtv", "The Office Us S02E01"),
         ("Mad.Max.Fury.Road.2015.2160p.UHD.BluRay", "Mad Max Fury Road (2015)"),
         ("2001.A.Space.Odyssey.1968.1080p", "2001 A Space Odyssey (1968)"),

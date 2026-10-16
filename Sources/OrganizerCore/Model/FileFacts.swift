@@ -41,9 +41,12 @@ public struct FileFacts: Codable, Sendable {
     public var nameIsUnclear: Bool
     /// Things that went wrong while reading; shown with `organize facts`.
     public var notes: [String]
-    /// Text recognition was skipped (quick scan) on a file that needs it: an image or a scan.
-    /// Until it's read in full, nothing about it can be decided safely.
+    /// Its text couldn't be read: text recognition was skipped (quick scan) or failed, or the
+    /// document is locked or broken. Until it's read, nothing about it can be decided safely.
     public var needsDeepRead = false
+    /// Something sensitive found while reading more of the file than `text` keeps (secrets
+    /// past the excerpt the model sees).
+    public var sensitive: SensitiveFinding?
 
     public enum TextSource: String, Codable, Sendable {
         case content, pdfText, pdfOCR, office, imageOCR

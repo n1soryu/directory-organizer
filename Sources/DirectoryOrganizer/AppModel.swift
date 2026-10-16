@@ -226,7 +226,19 @@ final class AppModel {
     /// and a burst of changes causes at most one extra scan).
     func requestScan() {
         if isScanning || organizing != nil { scanRequested = true; return }
-        Task { await scan() }
+        // Claimed here, not when the task starts: a second request in the meantime must wait.
+        isScanning = true
+        Task { await runScans() }
+    }
+
+    /// Scans until no more were asked for meanwhile (a burst of changes: one extra scan at
+    /// most). The caller has set `isScanning`; it's cleared here.
+    private func runScans() async {
+        defer { isScanning = false }
+        repeat {
+            scanRequested = false
+            await scan()
+        } while scanRequested && organizing == nil
     }
 
     private func scan() async {
@@ -238,9 +250,7 @@ final class AppModel {
             show(.warning, "The watched folder doesn't exist: \(display(watchedURL)). Run `swift run make-testdata`.")
             return
         }
-        isScanning = true
         let started = Date()
-        defer { isScanning = false }
 
         // Quick scan: rules only, no text recognition, no model. Heavy work waits for Organize Now.
         var planner = Planner(homeRoot: homeURL, mode: .quick)
@@ -292,11 +302,6 @@ final class AppModel {
         }
         await notifyAbout(newOnes)
         await autoApply()
-
-        if scanRequested {
-            scanRequested = false
-            await scan()
-        }
     }
 
     /// Saves what the last plan learned about your folders, if anything changed.
@@ -386,8 +391,12 @@ final class AppModel {
             }
         }
         // Fold the results into the plan (and catch up on anything that arrived meanwhile).
-        scanRequested = false
-        await scan()
+        if isScanning {
+            scanRequested = true
+        } else {
+            isScanning = true
+            await runScans()
+        }
     }
 
     private func notifyAbout(_ newOnes: [ProposedAction]) async {
