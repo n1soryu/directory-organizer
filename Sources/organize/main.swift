@@ -21,6 +21,8 @@ let usage = """
           List moves and undos, newest first.
       organize facts <file>
           Show everything extracted from one file (as JSON).
+      organize describe <file>...
+          What Apple's model says each file is, and the category it groups it by.
 
       --home   stand-in home folder (default: <folder>/../Home for plan/apply, TestData/Home otherwise)
       The move log is kept next to the home folder: <home>/../moves.jsonl
@@ -209,6 +211,19 @@ case "facts":
     refuseRealFolders(file.deletingLastPathComponent())
     let facts = await FactExtractor().facts(for: file)
     print(String(decoding: try encoder().encode(facts), as: UTF8.self))
+
+case "describe":
+    guard !args.isEmpty else { fail("which files?") }
+    for file in args.map(path) {
+        refuseRealFolders(file.deletingLastPathComponent())
+        let facts = await FactExtractor().facts(for: file)
+        do {
+            let description = try await AppleClassifier().describe(facts)
+            print("\(file.lastPathComponent): \(description.kind) [\(description.category)]")
+        } catch {
+            print("\(file.lastPathComponent): \(error)")
+        }
+    }
 
 case "-h", "--help", "help":
     print(usage)

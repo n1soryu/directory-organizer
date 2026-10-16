@@ -16,14 +16,16 @@ enum TextRecognizer {
 
     /// Tries twice: Vision can fail under load and succeed a moment later.
     private static func recognize(
-        _ perform: (RecognizeTextRequest) async throws -> [RecognizedTextObservation]
+        _ perform: @escaping @Sendable (RecognizeTextRequest) async throws -> [RecognizedTextObservation]
     ) async -> String? {
         var request = RecognizeTextRequest()
         request.recognitionLevel = .accurate
-        var result = try? await perform(request)
+        // Normally well under a second; a stalled call counts as failed (nil), not as "no text".
+        let attempt = { [request] in try? await withTimeout(seconds: 30) { try await perform(request) } }
+        var result = await attempt() ?? nil
         if result == nil {
             try? await Task.sleep(for: .milliseconds(200))
-            result = try? await perform(request)
+            result = await attempt() ?? nil
         }
         guard let observations = result else { return nil }
         // Reading order: top to bottom (Vision's y axis points up), then left to right.

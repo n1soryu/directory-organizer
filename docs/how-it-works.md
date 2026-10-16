@@ -28,7 +28,7 @@ A wrong guess sends the file to the review folder; it is never lost.
 **Next (approved 2026-10-14):** a model-led app with few rules, in phases:
 1. Folders in Downloads: read inside, safety-checked, left alone while changing, unpacked when the model says so ✅ (0.7.0-dev)
 2. Folder profiles learned from your own folders (replacing the fixed folder list and personal prompt) ✅
-3. Grouping: code groups similar files, the model decides per group; new folders only for groups of 2–3+
+3. Grouping: code groups similar files, the model decides per group; new folders only for groups of 2–3+ ✅
 4. Evaluation harness (the old Milestone 6), before any autonomy
 5. Only universal rules left (safety, installers, code projects, incomplete downloads); NSU/FSAE/course rules removed
 6. Earned autonomy: per-folder trust from your approvals; undo and corrections lower it
@@ -114,6 +114,34 @@ were downloaded from, and the Finder tags most of them carry (2+ files and 60%+)
 - **Corrections:** a model move you undo is remembered ("notes.txt does not belong in
   Documents/FSAE") and up to 3 relevant ones are shown to the model next time. Moves you keep
   teach by example: the file becomes one of the folder's examples.
+
+## Similar files, placed together (grouping)
+
+In Organize Now, every leftover (no rule, not a duplicate, readable) is first **described** by the
+model: what it is ("airfryer manual") and its general category, like a folder name ("User Manuals").
+**Code groups** them: same main word in the category ("Bills" / "Utility Bills") or in the
+description ("router manual" / "airfryer manual"), or descriptions close in meaning (Apple's
+on-device sentence embedding, distance < 0.6). Vague words (files, documents, misc) don't group.
+
+- Each group of 2+ is **placed in one question**: the model sees all of them (up to 8) and picks an
+  existing folder or a new one. Its answer goes through the same checks as a single file's.
+- **Only a group can create a new folder.** A file placed on its own may go to an existing folder
+  or to one a group just created; a new folder of its own goes to review, even if another lone
+  file picked the same name (that's chance, not a pattern).
+- Group names are deterministic: the most common category, on a tie the more general one.
+- `organize describe <file>…` prints what the model says a file is.
+
+What didn't work, measured with the real model (kept here so it isn't tried again):
+- Grouping by embeddings of the file text: the airfryer manual came out closer to a bill (0.87)
+  than to the other manual (1.05). Short labels written by the model group well.
+- Asking the model "do these belong together?": it said no even to two bills it had just called
+  "electricity and water bills", before and after describing them. The group comes from its own
+  labels instead.
+- Example names in prompts ("Manuals", "Bills", later "Contracts", "Recipes") get copied as folder
+  names for unrelated files. Prompt examples must not match the test data, and are best kept few.
+
+**Stalls:** every model answer has 90 s and every text recognition 30 s; a stalled call counts as
+"model unavailable" / "unreadable" (so: review), and Cancel still stops at once.
 
 ## The model (Apple's on-device Foundation Models)
 

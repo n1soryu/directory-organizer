@@ -43,6 +43,7 @@ public struct Planner: Sendable {
 
         public enum Step: String, Sendable {
             case learning = "Learning your folders"
+            case grouping = "Finding similar files"
             case reading = "Reading"
             case deciding = "Deciding"
         }
@@ -115,6 +116,11 @@ public struct Planner: Sendable {
         var newFolders: [String: String] = [:]
         var actions: [ProposedAction] = []
         var waiting: [WaitingItem] = []
+        // Organize Now: the model says what each leftover is; similar ones are placed together.
+        let grouped = mode == .full
+            ? try await groupDecisions(facts, copies: copies, folders: folders, newFolders: &newFolders, progress: progress)
+            : [:]
+        var decided: [(item: FileFacts, decision: Decision)] = []
 
         for (index, item) in facts.enumerated() {
             try Task.checkCancellation()
@@ -131,9 +137,16 @@ public struct Planner: Sendable {
             } else if mode == .quick, let reason = waitReason(item) {
                 waiting.append(WaitingItem(source: item.url, name: item.name, identity: FileIdentity(item), reason: reason))
                 continue
+            } else if let together = grouped[item.url] {
+                decision = together
             } else {
                 decision = await decide(item, folders: folders, newFolders: &newFolders)
             }
+            decided.append((item, decision))
+        }
+        // New folders the model made for a group of similar files; no other may be created.
+        let groupFolders = Set(grouped.values.filter(isNewByModel).map(\.destination))
+        for (item, var decision) in requiringGroupsForNewFolders(decided, groupFolders: groupFolders) {
             let parent = item.url.deletingLastPathComponent()
             if parent.standardizedFileURL.path != folder.standardizedFileURL.path {
                 decision.reason = "From \(parent.lastPathComponent)/: \(decision.reason)"
@@ -147,6 +160,95 @@ public struct Planner: Sendable {
         plan.unpacked = unpacked
         plan.profiles = learned
         return plan
+    }
+
+    /// A new folder needs at least this many files of the same kind; the model may not make a
+    /// folder for one file. (A one-off goes to an existing folder, or to review.)
+    public var minimumNewFolderFiles = 2
+
+    /// Leftover files (no rule, not a duplicate, readable) are described by the model and
+    /// grouped by code; each group of 2+ is placed in one go. Files of groups the model says
+    /// aren't alike, and files alike with nothing else, aren't in the result: they're placed
+    /// one by one as before.
+    func groupDecisions(_ facts: [FileFacts], copies: [URL: URL], folders: [FolderOption],
+                        newFolders: inout [String: String],
+                        progress: (@Sendable (Progress) -> Void)?) async throws -> [URL: Decision] {
+        let leftovers = facts.filter {
+            copies[$0.url] == nil && !$0.needsDeepRead && rules.decide($0, config: config) == nil
+        }
+        guard leftovers.count >= 2 else { return [:] }
+
+        var described: [(facts: FileFacts, description: FileDescription)] = []
+        for (step, item) in leftovers.enumerated() {
+            try Task.checkCancellation()
+            progress?(Progress(done: step, total: leftovers.count, file: item.name, step: .grouping))
+            if let description = try? await classifier.describe(item) {
+                described.append((item, description))
+            }
+        }
+
+        var result: [URL: Decision] = [:]
+        for group in Grouper.groups(described.map(\.description)) where group.count >= minimumNewFolderFiles {
+            try Task.checkCancellation()
+            let members = group.map { described[$0].facts }
+            // The category most members share names the group; on a tie the more general
+            // (shorter) one, then alphabetical, so the same files always give the same name.
+            let categories = group.map { described[$0].description.category }
+            let counts = Dictionary(grouping: categories, by: { $0 }).mapValues(\.count)
+            let category = counts.keys.sorted { a, b in
+                counts[a]! != counts[b]! ? counts[a]! > counts[b]! : a.count != b.count ? a.count < b.count : a < b
+            }[0]
+            let offered = FolderCatalog.relevant(folders, toGroup: members, category: category, config: config)
+            var request = GroupRequest(members: members, category: category, folders: offered,
+                                       newFolderParents: commonParents(members), reviewFolder: config.reviewFolder)
+            request.corrections = members.flatMap { relevantCorrections(for: $0, offered: offered) }
+                .reduce(into: [Correction]()) { if !$0.contains($1) { $0.append($1) } }
+                .prefix(3).map(\.sentence)
+            guard let answer = try? await classifier.placeGroup(request), answer.belongTogether else { continue }
+
+            let shared = accept(answer.suggestion, kind: members[0].kind, inside: members[0].folder,
+                                nsuEvidence: members.allSatisfy(hasNSUEvidence), nameUnclear: false,
+                                offered: offered, folders: folders, newFolders: &newFolders)
+            let names = members.prefix(3).map(\.name).joined(separator: ", ") + (members.count > 3 ? "…" : "")
+            for member in members {
+                var decision = shared
+                decision.reason = "One of \(members.count) similar files (\(category): \(names)). \(decision.reason)"
+                if member.nameIsUnclear, wantsName(decision, member) {
+                    decision = await named(decision, member)
+                }
+                result[member.url] = decision
+            }
+        }
+        return result
+    }
+
+    /// Where a new folder may go for all of `members` (where they agree; Documents otherwise).
+    private func commonParents(_ members: [FileFacts]) -> [String] {
+        let each = members.map { Set(FolderCatalog.newFolderParents(for: $0)) }
+        let common = each.dropFirst().reduce(each.first ?? []) { $0.intersection($1) }
+        return common.isEmpty ? ["Documents"] : common.sorted()
+    }
+
+    /// A folder the model wants to create (one that doesn't exist yet).
+    func isNewByModel(_ decision: Decision) -> Bool {
+        guard case .classifier = decision.source else { return false }
+        return !FileManager.default.fileExists(atPath: homeRoot.appending(path: decision.destination).path)
+    }
+
+    /// New folders come only from groups of similar files. A file placed on its own may join a
+    /// folder a group created, but a new folder of its own goes to review instead, even when
+    /// another lone file happens to pick the same name (that's chance, not a pattern).
+    func requiringGroupsForNewFolders(_ decided: [(item: FileFacts, decision: Decision)],
+                                      groupFolders: Set<String>) -> [(item: FileFacts, decision: Decision)] {
+        decided.map { entry in
+            guard isNewByModel(entry.decision), !groupFolders.contains(entry.decision.destination) else { return entry }
+            var decision = entry.decision
+            decision.reason = "No group of similar files for the new folder \(decision.destination); a new folder needs \(minimumNewFolderFiles)+ similar files. Model: \(decision.reason)"
+            decision.destination = config.reviewFolder
+            decision.tags = []
+            decision.newBaseName = nil
+            return (entry.item, decision)
+        }
     }
 
     /// Your folders' profiles, up to date. Organize Now also has the model write the purpose of
@@ -271,6 +373,14 @@ public struct Planner: Sendable {
             return toReview("No rule matched; \(error)", confidence: 0)
         }
 
+        return accept(suggestion, kind: facts.kind, inside: facts.folder, nsuEvidence: hasNSUEvidence(facts),
+                      nameUnclear: facts.nameIsUnclear, offered: offered, folders: folders, newFolders: &newFolders)
+    }
+
+    /// Every model answer, for one file or a group, goes through these checks.
+    func accept(_ suggestion: ClassifierSuggestion, kind: FileKind, inside: FolderContents?, nsuEvidence: Bool,
+                nameUnclear: Bool, offered: [FolderOption], folders: [FolderOption],
+                newFolders: inout [String: String]) -> Decision {
         guard suggestion.confidence >= config.confidenceThreshold else {
             return toReview("Model unsure (\(Int(suggestion.confidence * 100))%), would have chosen \(suggestion.destination): \(suggestion.reason)",
                             confidence: suggestion.confidence)
@@ -286,7 +396,7 @@ public struct Planner: Sendable {
         // The folder must be one we offered, or a new folder that passes the checks.
         var destination = suggestion.destination
         if suggestion.isNewFolder {
-            switch newFolder(destination, kind: facts.kind, inside: facts.folder, folders: folders, newFolders: &newFolders) {
+            switch newFolder(destination, kind: kind, inside: inside, folders: folders, newFolders: &newFolders) {
             case .success(let path): destination = path
             case .failure(let problem): return rejected(suggestion, problem.message)
             }
@@ -296,13 +406,13 @@ public struct Planner: Sendable {
 
         // University folders need NSU evidence the model can't invent: the download source,
         // "North South University" in the text, or one of your course codes.
-        if destination == config.university || destination.hasPrefix(config.university + "/"), !hasNSUEvidence(facts) {
+        if destination == config.university || destination.hasPrefix(config.university + "/"), !nsuEvidence {
             return rejected(suggestion, "no sign it's an NSU file")
         }
 
         // Tags come from the folder, not from the model.
         let tags = Self.tags(for: destination, folders: folders)
-        let newName = facts.nameIsUnclear ? suggestion.newBaseName.flatMap(Self.validTitle) : nil
+        let newName = nameUnclear ? suggestion.newBaseName.flatMap(Self.validTitle) : nil
         return checked(Decision(destination: destination, newBaseName: newName, tags: tags,
                                 confidence: suggestion.confidence, reason: suggestion.reason,
                                 source: .classifier(classifier.name)))

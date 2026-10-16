@@ -65,6 +65,7 @@ Both debug runs use a throwaway settings file, never your real one.
 | `swift run organize undo --all` | Undo every move that's still in place |
 | `swift run organize log` | History of moves and undos, newest batch first |
 | `swift run organize facts "TestData/Downloads/scan0001.pdf"` | Everything the app read from one file (text, OCR, source URL, dates…) |
+| `swift run organize describe TestData/Downloads/*.pdf` | What Apple's model says each file is, and the category it groups it by |
 | `swift run organize help` | Usage |
 
 **Option for any command:** `--home <folder>` uses a different stand-in home folder. The defaults are

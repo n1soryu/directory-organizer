@@ -52,6 +52,41 @@ public struct UnpackSuggestion: Codable, Sendable {
     }
 }
 
+/// What a file is, in the model's words: the label similar files are grouped by.
+public struct FileDescription: Codable, Sendable, Equatable {
+    /// Specific: "air fryer user manual", "electricity bill".
+    public var kind: String
+    /// General, like a folder name: "Manuals", "Bills".
+    public var category: String
+
+    public init(kind: String, category: String) {
+        self.kind = kind
+        self.category = category
+    }
+}
+
+/// Several downloads the model described as the same kind of thing, to be placed together.
+public struct GroupRequest: Sendable {
+    public var members: [FileFacts]
+    /// The category they share ("Bills").
+    public var category: String
+    public var folders: [FolderOption]
+    public var newFolderParents: [String]
+    public var reviewFolder: String
+    public var corrections: [String] = []
+}
+
+/// Where a group goes, or that its files aren't really alike (then each is placed on its own).
+public struct GroupSuggestion: Sendable {
+    public var belongTogether: Bool
+    public var suggestion: ClassifierSuggestion
+
+    public init(belongTogether: Bool, suggestion: ClassifierSuggestion) {
+        self.belongTogether = belongTogether
+        self.suggestion = suggestion
+    }
+}
+
 /// A suggested name for a file whose own name says nothing ("IMG_4821", "download").
 public struct NameSuggestion: Codable, Sendable {
     /// A few words describing the file, without extension or date ("Router login page").
@@ -88,6 +123,10 @@ public protocol FileClassifier: Sendable {
     func suggestUnpack(for facts: FileFacts) async throws -> UnpackSuggestion
     /// What one of your folders is for, in a few words, from what's in it.
     func describeFolder(_ profile: FolderProfile) async throws -> String
+    /// What a downloaded file is, specific and general (for grouping similar files).
+    func describe(_ facts: FileFacts) async throws -> FileDescription
+    /// One folder for a group of similar files.
+    func placeGroup(_ request: GroupRequest) async throws -> GroupSuggestion
 }
 
 extension FileClassifier {
@@ -98,6 +137,15 @@ extension FileClassifier {
 
     /// Without a model a folder's purpose stays unknown.
     public func describeFolder(_ profile: FolderProfile) async throws -> String {
+        throw ClassifierError.unavailable("no model in use")
+    }
+
+    /// Without a model nothing is grouped: every file is placed on its own.
+    public func describe(_ facts: FileFacts) async throws -> FileDescription {
+        throw ClassifierError.unavailable("no model in use")
+    }
+
+    public func placeGroup(_ request: GroupRequest) async throws -> GroupSuggestion {
         throw ClassifierError.unavailable("no model in use")
     }
 }

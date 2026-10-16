@@ -63,18 +63,30 @@ public enum FolderCatalog {
     /// kind. Only ranking: the planner still checks new folders against all of them.
     public static func relevant(_ folders: [FolderOption], to facts: FileFacts, config: OrganizerConfig,
                                 limit: Int = maxOffered) -> [FolderOption] {
+        relevant(folders, words: words(facts.name + " " + facts.head(1_500) + " " + (facts.documentTitle ?? "")),
+                 hosts: Set(facts.sourceHosts), kinds: [facts.kind], config: config, limit: limit)
+    }
+
+    /// The same for a group of similar files: what they share and what any of them says.
+    public static func relevant(_ folders: [FolderOption], toGroup members: [FileFacts], category: String,
+                                config: OrganizerConfig, limit: Int = maxOffered) -> [FolderOption] {
+        let text = ([category] + members.map { $0.name + " " + $0.head(300) }).joined(separator: " ")
+        return relevant(folders, words: words(text), hosts: Set(members.flatMap(\.sourceHosts)),
+                        kinds: Set(members.map(\.kind)), config: config, limit: limit)
+    }
+
+    static func relevant(_ folders: [FolderOption], words: Set<String>, hosts: Set<String>, kinds: Set<FileKind>,
+                         config: OrganizerConfig, limit: Int) -> [FolderOption] {
         let universalPaths = Set(universal(config).map(\.path))
         let fixed = folders.filter { universalPaths.contains($0.path) }
         let rest = folders.filter { !universalPaths.contains($0.path) }
         guard fixed.count + rest.count > limit else { return folders }
 
-        let words = Self.words(facts.name + " " + facts.head(1_500) + " " + (facts.documentTitle ?? ""))
-        let hosts = Set(facts.sourceHosts)
         func score(_ folder: FolderOption) -> Double {
             let folderWords = Self.words(([folder.path, folder.purpose ?? ""] + folder.examples).joined(separator: " "))
             var score = Double(words.intersection(folderWords).count)
             if folder.sources.contains(where: { source in hosts.contains { $0 == source || $0.hasSuffix("." + source) } }) { score += 3 }
-            if let count = folder.kinds[facts.kind.rawValue], count > 0 { score += 2 }
+            if kinds.contains(where: { (folder.kinds[$0.rawValue] ?? 0) > 0 }) { score += 2 }
             return score
         }
         // Stable: equal scores keep the catalog's order.

@@ -16,6 +16,9 @@ public struct AppleClassifier: FileClassifier {
     /// The model isn't good at precise probabilities, so it picks a word; we map it to a number.
     static let confidenceLevels: [String: Double] = ["high": 0.9, "medium": 0.75, "low": 0.4]
 
+    /// An answer normally takes 1-3 s; one that takes this long isn't coming.
+    static let answerTimeout = 90.0
+
     public init() {}
 
     /// nil if the model can be used, otherwise why not, in plain words.
@@ -43,7 +46,7 @@ public struct AppleClassifier: FileClassifier {
         // purpose matches, decide whether one fits, and only then pick it (a reason written
         // after the choice only defends it). Tags aren't asked for: they follow from the folder.
         let schema = try GenerationSchema(root: DynamicGenerationSchema(name: "FileDecision", properties: [
-            .init(name: "kind", description: "What this file is, in 2-5 words (e.g. router user manual, electricity bill, lecture slides)",
+            .init(name: "kind", description: "What this file is, in 2-5 words (e.g. phone contract, tax return, gym membership receipt)",
                   schema: .init(type: String.self)),
             .init(name: "reason", description: "One sentence: which listed folder's purpose matches this kind of file and why, or why none does",
                   schema: .init(type: String.self)),
@@ -83,9 +86,11 @@ public struct AppleClassifier: FileClassifier {
     }
 
     /// The second question: which general category folder should this kind of file get?
-    private func newFolder(for request: ClassificationRequest, kind: String, newName: String?) async throws -> ClassifierSuggestion {
+    /// `context` is told to the model only ("one of 3 similar files"), not put in the reason.
+    private func newFolder(for request: ClassificationRequest, kind: String, context: String = "",
+                           newName: String?) async throws -> ClassifierSuggestion {
         let schema = try GenerationSchema(root: DynamicGenerationSchema(name: "NewFolder", properties: [
-            .init(name: "folderName", description: "A general category name, 1-3 words, plural (e.g. Manuals, Bills, Receipts)",
+            .init(name: "folderName", description: "A general category name, 1-3 words, plural (e.g. Contracts, Tax Documents, Recipes)",
                   schema: .init(type: String.self)),
             .init(name: "parent", description: "Where the new folder goes",
                   schema: .init(name: "Parent", anyOf: request.newFolderParents)),
@@ -96,11 +101,11 @@ public struct AppleClassifier: FileClassifier {
         let instructions = """
             You organize downloaded files on a Mac. None of the existing folders fits this file, so it needs a new folder. \
             Name the folder after the general kind of file, so similar files can go there too: \
-            "Manuals" for any user guide, "Bills" for any utility bill. Never use the file's own name, a brand or a date. \
+            "Contracts" for any contract, "Recipes" for any recipe. Never use the file's own name, a brand or a date. \
             Existing folder names, for reference: \(existing.joined(separator: ", ")).
             """
         let content = try await respond(instructions: instructions, schema: schema) { limit in
-            Prompt { "This file is: \(kind)\n\n" + FactSummary.describe(request.facts, textLimit: min(limit, 800)) }
+            Prompt { "This file is: \(kind)\(context)\n\n" + FactSummary.describe(request.facts, textLimit: min(limit, 800)) }
         }
         let name: String = try content.value(forProperty: "folderName")
         let parent: String = try content.value(forProperty: "parent")
@@ -128,7 +133,7 @@ public struct AppleClassifier: FileClassifier {
         let instructions = """
             You name downloaded files on a Mac. Given a file's details\(showImage ? " and the picture itself" : ""), \
             write a short, specific, descriptive title, the way a careful person would name the file. \
-            Describe what it is (e.g. "Router wireless settings page", "Bank statement September"), not its format. \
+            Describe what it is (e.g. "Gym membership contract", "Bank statement September"), not its format. \
             If you can't tell what it is, say so with low confidence.
             """
         let content = try await respond(instructions: instructions, schema: schema) { limit in
@@ -151,7 +156,7 @@ public struct AppleClassifier: FileClassifier {
 
         // Describe first, then decide: the description steers the answer.
         let schema = try GenerationSchema(root: DynamicGenerationSchema(name: "FolderDecision", properties: [
-            .init(name: "kind", description: "What this folder is, in 2-5 words (e.g. photo album, film with subtitles, course pack, mixed downloads)",
+            .init(name: "kind", description: "What this folder is, in 2-5 words (e.g. photo album, software project, assorted downloads)",
                   schema: .init(type: String.self)),
             .init(name: "belongsTogether", description: "Do the items only make sense together, as one thing?",
                   schema: .init(name: "Together", anyOf: ["yes", "no"])),
@@ -166,7 +171,7 @@ public struct AppleClassifier: FileClassifier {
             Keep together when the parts depend on each other or form one collection: a software project, \
             a website, an album or photo set from one event, a course pack, a game, a document with its attachments.
             Unpack when the items are unrelated or of different kinds, so each one can be filed on its own: \
-            a folder of assorted downloads, a mix of bills, manuals and pictures, a film with only extras around it.
+            a folder of assorted downloads, a mix of contracts, receipts and pictures.
             When in doubt, keep it together.
             """
         let content = try await respond(instructions: instructions, schema: schema) { limit in
@@ -190,9 +195,13 @@ public struct AppleClassifier: FileClassifier {
         var limit = textLimit
         while true {
             let session = LanguageModelSession(instructions: instructions)
+            let request = prompt(limit)
             do {
-                let response = try await session.respond(
-                    to: prompt(limit), schema: schema, options: GenerationOptions(samplingMode: .greedy))
+                guard let response = try await withTimeout(seconds: Self.answerTimeout, {
+                    try await session.respond(to: request, schema: schema, options: GenerationOptions(samplingMode: .greedy))
+                }) else {
+                    throw ClassifierError.unavailable("the model didn't answer within \(Int(Self.answerTimeout)) s")
+                }
                 return response.content
             } catch let error as LanguageModelError {
                 switch error {
@@ -237,12 +246,87 @@ public struct AppleClassifier: FileClassifier {
         return text
     }
 
+    // MARK: - What is this file? (for grouping similar ones)
+
+    public func describe(_ facts: FileFacts) async throws -> FileDescription {
+        if let reason = Self.unavailableReason() { throw ClassifierError.unavailable(reason) }
+        let schema = try GenerationSchema(root: DynamicGenerationSchema(name: "FileKind", properties: [
+            .init(name: "kind", description: "What this file is, specific, 2-5 words (e.g. phone contract, tax return, gym membership receipt)",
+                  schema: .init(type: String.self)),
+            .init(name: "category", description: "The general category of files it belongs to, 1-2 words, plural, as a folder name (e.g. Contracts, Tax Documents, Receipts, Recipes)",
+                  schema: .init(type: String.self)),
+        ]), dependencies: [])
+        let instructions = """
+            You look at one downloaded file on a Mac and say what it is: specifically, and as a general \
+            category that similar files would share. Judge by the content more than the file name.
+            """
+        let content = try await respond(instructions: instructions, schema: schema) { limit in
+            Prompt { FactSummary.describe(facts, textLimit: min(limit, 800)) }
+        }
+        let kind: String = try content.value(forProperty: "kind")
+        let category: String = try content.value(forProperty: "category")
+        return FileDescription(kind: kind.trimmingCharacters(in: .whitespacesAndNewlines),
+                               category: category.trimmingCharacters(in: CharacterSet(charactersIn: " ./\"'\n")))
+    }
+
+    // MARK: - Where does this group of similar files go?
+
+    public func placeGroup(_ request: GroupRequest) async throws -> GroupSuggestion {
+        if let reason = Self.unavailableReason() { throw ClassifierError.unavailable(reason) }
+        let folderChoices = request.folders.map(\.path) + [Self.noneFits]
+        // Not asked: "do these belong together?". The group comes from the model's own labels,
+        // and asked directly it said "no" even to two bills it called "electricity and water
+        // bills" (tried before and after describing them). Order as for one file.
+        let schema = try GenerationSchema(root: DynamicGenerationSchema(name: "GroupDecision", properties: [
+            .init(name: "kind", description: "What these files are, together, in 2-5 words",
+                  schema: .init(type: String.self)),
+            .init(name: "reason", description: "One sentence: which listed folder's purpose matches these files and why, or why none does",
+                  schema: .init(type: String.self)),
+            .init(name: "existingFolderFits", description: "Is there a listed folder whose purpose clearly matches these files?",
+                  schema: .init(name: "Fits", anyOf: ["yes", "no"])),
+            .init(name: "destination", description: "The matching folder, or \"none of these\" if no folder's purpose matches",
+                  schema: .init(name: "Folder", anyOf: folderChoices)),
+            .init(name: "confidence", description: "How sure you are",
+                  schema: .init(name: "Confidence", anyOf: ["high", "medium", "low"])),
+        ]), dependencies: [])
+        let instructions = Self.instructions(folders: request.folders, review: request.reviewFolder,
+                                             corrections: request.corrections)
+        let shown = request.members.prefix(8)
+        let content = try await respond(instructions: instructions, schema: schema) { limit in
+            // The text budget is shared by all the files shown.
+            let each = max(150, min(400, limit / max(shown.count, 1)))
+            let list = shown.enumerated().map { "File \($0.offset + 1):\n" + FactSummary.describe($0.element, textLimit: each) }
+            let more = request.members.count > shown.count ? "\n(and \(request.members.count - shown.count) more like these)" : ""
+            return Prompt {
+                "These \(request.members.count) downloaded files look like the same kind of thing (\(request.category)). Where should they all go?\n\n"
+                    + list.joined(separator: "\n\n") + more
+            }
+        }
+
+        let destination: String = try content.value(forProperty: "destination")
+        let kind: String = (try? content.value(forProperty: "kind")) ?? request.category
+        let fits: String = (try? content.value(forProperty: "existingFolderFits")) ?? "yes"
+        let because: String = (try? content.value(forProperty: "reason")) ?? ""
+        let level: String = (try? content.value(forProperty: "confidence")) ?? "low"
+        var suggestion = ClassifierSuggestion(destination: destination, confidence: Self.confidenceLevels[level] ?? 0.4,
+                                              reason: "\(kind.prefix(1).uppercased() + kind.dropFirst()): \(because)")
+        if destination == Self.noneFits || (fits == "no" && destination == request.reviewFolder) {
+            // A new folder for the group, named from what they share.
+            let first = ClassificationRequest(facts: request.members[0], folders: request.folders,
+                                              newFolderParents: request.newFolderParents, reviewFolder: request.reviewFolder)
+            suggestion = try await newFolder(for: first, kind: kind,
+                                             context: " (one of \(request.members.count) similar files, category: \(request.category))",
+                                             newName: nil)
+        }
+        return GroupSuggestion(belongTogether: true, suggestion: suggestion)
+    }
+
     // MARK: - What is this folder of yours for?
 
     public func describeFolder(_ profile: FolderProfile) async throws -> String {
         if let reason = Self.unavailableReason() { throw ClassifierError.unavailable(reason) }
         let schema = try GenerationSchema(root: DynamicGenerationSchema(name: "FolderPurpose", properties: [
-            .init(name: "purpose", description: "What kind of files belong in this folder, 2-8 words, plural (e.g. electricity and water bills, router and appliance manuals)",
+            .init(name: "purpose", description: "What kind of files belong in this folder, 2-8 words, plural (e.g. tax returns and payslips, recipes from cooking sites)",
                   schema: .init(type: String.self)),
         ]), dependencies: [])
         let instructions = """
