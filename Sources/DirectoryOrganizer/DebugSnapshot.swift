@@ -14,6 +14,10 @@ enum DebugSnapshot {
             endToEnd(model: model)
             return true
         }
+        if ProcessInfo.processInfo.environment["DO_MODEL_DOWNLOAD"] != nil {
+            modelDownload(model: model)
+            return true
+        }
         guard let outDir = ProcessInfo.processInfo.environment["DO_SNAPSHOT"] else { return false }
         Task { @MainActor in
             model.start()
@@ -48,6 +52,41 @@ enum DebugSnapshot {
             NSApp.terminate(nil)
         }
         return true
+    }
+
+    /// `DO_MODEL_DOWNLOAD=1`: presses Settings → Download Models and prints each model's status
+    /// as it changes, then quits. Downloads for real, into the real model folder.
+    /// `DO_MODEL_DOWNLOAD=cancel` presses Cancel once a model is 30% done.
+    @MainActor private static func modelDownload(model: AppModel) {
+        Task { @MainActor in
+            let models = model.localModels
+            models.refresh()
+            @MainActor func line() -> String {
+                ModelSpec.all.map { spec in
+                    switch models.status[spec.id] ?? .notDownloaded {
+                    case .notDownloaded: "\(spec.displayName): not downloaded"
+                    case .downloading(let f): "\(spec.displayName): \(Int(f * 10) * 10)%"
+                    case .ready: "\(spec.displayName): ready"
+                    case .failed(let message): "\(spec.displayName): failed (\(message))"
+                    }
+                }.joined(separator: " | ")
+            }
+            print("models: \(line())")
+            model.downloadModels()
+            let cancelAt30 = ProcessInfo.processInfo.environment["DO_MODEL_DOWNLOAD"] == "cancel"
+            var last = ""
+            while models.isDownloading {
+                if cancelAt30, models.status.values.contains(where: { if case .downloading(let f) = $0 { f >= 0.3 } else { false } }) {
+                    model.cancelModelDownload()
+                }
+                let now = line()
+                if now != last { print("models: \(now)"); last = now }
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+            print("models: \(line())")
+            print("activity: \(model.activity.prefix(2).map(\.text).reversed().joined(separator: " → "))")
+            NSApp.terminate(nil)
+        }
     }
 
     /// `DO_E2E=1`: drives the app model like a user would, on the sandbox, and prints what happened:

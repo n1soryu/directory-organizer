@@ -46,9 +46,13 @@ swift run make-testdata              # sandbox: fake downloads + a stand-in home
 ./scripts/build-app.sh --open        # build and open the app
 ./scripts/test.sh                    # run the tests
 swift run organize plan TestData/Downloads   # or use the command-line tool
+build/cli/organize model-check --download    # fetch the MLX models (~5 GB, once) and test them
 ```
 
-Only the Command Line Tools are needed, not Xcode.
+Needs full Xcode with the Metal toolchain: the app is built with `xcodebuild`, the only tool that
+compiles the GPU shaders of [MLX](https://github.com/ml-explore/mlx-swift), which will run the
+on-device models (see [docs/mlx-plan.md](docs/mlx-plan.md)). `swift run` still works for the CLI,
+except `model-check`.
 
 ## Docs
 

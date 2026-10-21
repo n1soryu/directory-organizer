@@ -135,6 +135,8 @@ final class AppModel {
     private(set) var modelUnavailableReason: String?
     private(set) var modelSeesImages = false
     var notificationStatus: Notifier.Status = .unknown
+    /// The MLX models (downloaded in Settings; used from Milestone B on).
+    let localModels = LocalModels()
     /// A message shown at the top of the dashboard until dismissed.
     var banner: ActivityEvent?
 
@@ -207,6 +209,7 @@ final class AppModel {
         started = true
         log(.info, "Directory Organizer started (sandbox: \(display(watchedURL)))")
         refreshModelStatus()
+        localModels.refresh()
         reloadJournal()
         profiles = profileStore.load()
         refreshReviewFolder()
@@ -555,6 +558,18 @@ final class AppModel {
     func refreshModelStatus() {
         modelUnavailableReason = AppleClassifier.unavailableReason()
         modelSeesImages = AppleClassifier.canSeeImages
+    }
+
+    func downloadModels() {
+        log(.info, "Downloading the on-device models (\(localModels.missingBytes.fileSize))")
+        localModels.downloadMissing { [weak self] failure in
+            if let failure { self?.show(.error, failure) } else { self?.log(.success, "On-device models downloaded") }
+        }
+    }
+
+    func cancelModelDownload() {
+        localModels.cancel()
+        log(.info, "Model download cancelled; files that finished downloading are kept for next time")
     }
 
     // MARK: - Watching

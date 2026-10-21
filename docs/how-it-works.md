@@ -35,7 +35,9 @@ A wrong guess sends the file to the review folder; it is never lost.
 
 ## Try it
 
-Needs macOS 27 and Swift 6 (the Command Line Tools are enough; Xcode isn't required). One quirk:
+Needs macOS 27, Swift 6 and full Xcode with the Metal toolchain: `scripts/build-app.sh` uses
+`xcodebuild`, because only it compiles MLX's GPU shaders (`swift build` compiles MLX, but without
+them it can't run a model). One quirk:
 the macOS 27 SDK declares SwiftUI's `@State` also as a macro whose plugin only ships with Xcode,
 so the app uses `@ViewState` (an alias for the property wrapper).
 
@@ -53,6 +55,11 @@ swift run organize log                       # history of moves and undos
 ```sh
 ./scripts/build-app.sh --open    # builds build/Directory Organizer.app and opens it
 ```
+
+It also builds the CLI as `build/cli/organize`, next to the same shader bundle. That's the one to
+use for `organize model-check [--download]`, which loads each MLX model and runs a short sample
+(valid JSON, speed, memory). Settings → On-device models downloads them in the app; they're kept
+in `~/Library/Application Support/DirectoryOrganizer/Models`, pinned to fixed revisions.
 
 A tray icon appears in the menu bar (with the number of files waiting) and the dashboard opens.
 Notifications only work in this bundled app, not with `swift run`.

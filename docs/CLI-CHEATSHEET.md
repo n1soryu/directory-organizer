@@ -57,6 +57,8 @@ Both debug runs use a throwaway settings file, never your real one.
 | `swift run organize plan TestData/Downloads --no-model` | Full read, but rules only: files no rule can place go to review |
 | `swift run organize plan TestData/Downloads --quick` | What the app's automatic quick scan sees: no text recognition, no model; lists what waits for Organize Now |
 | `swift run organize model` | Is Apple's on-device model available (and can it see images)? |
+| `build/cli/organize model-check` | Load each MLX model and run one short sample: valid JSON, tokens per second, peak memory (needs `./scripts/build-app.sh` first) |
+| `build/cli/organize model-check --download` | The same, after downloading any missing model (~5 GB, once) |
 | `swift run organize apply TestData/Downloads` | Show the plan, then ask: **[a]** all · **[o]** one by one · **[c]** cancel |
 | `swift run organize apply TestData/Downloads --yes` | Apply everything without asking (`--no-model` works here too) |
 | `swift run organize undo --last` | Put back the most recent batch exactly as it was |

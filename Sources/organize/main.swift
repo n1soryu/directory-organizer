@@ -15,6 +15,11 @@ let usage = """
           --no-model   rules only: files no rule can place go to review
       organize model
           Is Apple's on-device model available?
+      organize model-check [--download]
+          Load each MLX model and run one short sample: valid JSON, speed, memory.
+          --download   fetch missing models first (~5 GB, once)
+          Needs the xcodebuild binary (./scripts/build-app.sh → build/cli/organize);
+          `swift run` can't run MLX, because only xcodebuild compiles its GPU shaders.
       organize undo --last | --batch <id> | --all | <file name>  [--home <folder>]
           Put files back exactly as they were (original folder, name and tags).
       organize log [--home <folder>]
@@ -204,6 +209,13 @@ case "model":
     } else {
         print("Apple's on-device model: available\(AppleClassifier.canSeeImages ? ", can look at images" : "").")
     }
+
+case "model-check":
+    let arguments = Arguments(args)
+    guard arguments.positional.isEmpty, arguments.flags.isSubset(of: ["--download"]) else {
+        fail("model-check takes only --download")
+    }
+    await runModelCheck(download: arguments.flags.contains("--download"))
 
 case "facts":
     let arguments = Arguments(args)

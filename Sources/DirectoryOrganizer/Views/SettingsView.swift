@@ -84,6 +84,36 @@ struct SettingsView: View {
             }
 
             Section {
+                ForEach(ModelSpec.all) { spec in
+                    LabeledContent {
+                        modelStatusLabel(model.localModels.status[spec.id] ?? .notDownloaded)
+                    } label: {
+                        Text(spec.displayName)
+                        Text(spec.downloadBytes.fileSize).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                HStack {
+                    if model.localModels.isDownloading {
+                        Button("Cancel Download") { model.cancelModelDownload() }
+                    } else if !model.localModels.allReady {
+                        Button("Download Models (\(model.localModels.missingBytes.fileSize))") { model.downloadModels() }
+                            .buttonStyle(.borderedProminent)
+                    }
+                    Button("Show in Finder", systemImage: "folder") { model.reveal(model.localModels.store.directory) }
+                        .disabled(!FileManager.default.fileExists(atPath: model.localModels.store.directory.path))
+                }
+                if let free = model.localModels.freeBytes, !model.localModels.allReady {
+                    Text("\(free.fileSize) free on this Mac; the download needs \(model.localModels.missingBytes.fileSize) plus 1 GB to spare.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            } header: {
+                Text("On-device models (MLX)")
+            } footer: {
+                Text("Downloaded once from Hugging Face, then everything runs on this Mac; no file ever leaves it. If a download is interrupted, the files that already finished are kept. The organizer starts using these models in a later update.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
+            Section {
                 ForEach(AutoApplyPolicy.categories) { category in
                     Toggle(isOn: Binding(
                         get: { model.settings.autoApply.enabled.contains(category.id) },
@@ -145,6 +175,7 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
+        .onAppear { model.localModels.refresh() }  // the CLI may have downloaded them meanwhile
         .scrollContentBackground(.hidden)
         .background(Theme.page)
     }
@@ -163,6 +194,19 @@ struct SettingsView: View {
                 Button("Show", systemImage: "folder") { NSWorkspace.shared.open(URL(filePath: path)) }
                     .labelStyle(.iconOnly)
             }
+        }
+    }
+
+    @ViewBuilder private func modelStatusLabel(_ status: LocalModels.Status) -> some View {
+        switch status {
+        case .notDownloaded: Text("not downloaded").foregroundStyle(.secondary)
+        case .downloading(let fraction):
+            HStack {
+                ProgressView(value: fraction).frame(width: 120)
+                Text(fraction.formatted(.percent.precision(.fractionLength(0)))).monospacedDigit()
+            }
+        case .ready: Label("Ready", systemImage: "checkmark.circle").foregroundStyle(.green)
+        case .failed(let message): Label(message, systemImage: "xmark.circle").foregroundStyle(.red).lineLimit(2)
         }
     }
 
