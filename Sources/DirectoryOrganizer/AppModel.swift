@@ -377,6 +377,9 @@ final class AppModel {
     var isOrganizeRunning: Bool { organizeTask != nil }
 
     private func runFullOrganize() async {
+        // Finished, failed or cancelled: the Mac may idle-sleep again.
+        let awake = KeepAwake(reason: "Organize Now is reading files and running the on-device models")
+        defer { awake.end() }
         while isScanning { try? await Task.sleep(for: .milliseconds(100)) }
         let started = Date()
         refreshModelStatus()

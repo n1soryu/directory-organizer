@@ -296,7 +296,8 @@ The app splits the work in two:
   installers, password exports, duplicates and the like show up ready to approve right away.
 - **Organize Now, when you press it** (menu bar, dashboard toolbar, or ⇧⌘O). The heavy work:
   text recognition for images and scanned PDFs, and the model for files no rule fits and for
-  unclear names, asked fresh. Images are looked at by the vision model first. Progress shows in the menu bar (percentage, current file and step,
+  unclear names, asked fresh. Images are looked at by the vision model first. While it runs (in the app, or
+  `organize plan`/`apply` with the models), the Mac doesn't idle-sleep; the display still can. Progress shows in the menu bar (percentage, current file and step,
   elapsed time) with **Cancel** (⌘.); cancelling is safe because planning only reads. A
   notification summarizes the run, and its results stick to each file until it changes.
 

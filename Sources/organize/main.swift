@@ -145,6 +145,9 @@ func makePlan(_ folder: URL, _ home: URL, useModel: Bool, quick: Bool = false) a
             engine = mlx
         }
     }
+    // Minutes of model work: keep the Mac from idle-sleeping until it's done.
+    let awake = engine == nil ? nil : KeepAwake(reason: "organize: running the on-device models")
+    defer { awake?.end() }
     do {
         let plan = try await planner.plan(folder: folder)
         if let engine {
