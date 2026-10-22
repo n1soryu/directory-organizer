@@ -1,6 +1,6 @@
 # Plan: on-device models with MLX (language, vision, embeddings)
 
-Status: **Milestone A done** (2026-10-21); B is next. Plan written and approved 2026-10-21.
+Status: **Milestones A and B done** (2026-10-21/22); C is next. Plan written and approved 2026-10-21.
 Each milestone gets its own detailed plan, shown to the user before work begins, and ends with a commit.
 
 ## Why
@@ -93,7 +93,13 @@ peak 5.2 GB; embeddings 14 ms per text after warm-up. A cancelled download keeps
 Swift 6 language mode notes: build `UserInput` inside `ModelContainer.perform {}`, because it isn't Sendable.
 The first guided-grammar compile blocks, so keep it off the main actor (only relevant if guided JSON is ever used).
 
-### B. Cards with Qwen3 and removal of Apple's model
+### B. Cards with Qwen3 and removal of Apple's model — done 2026-10-22
+Outcome (sandbox, `organize plan`, 7 min 12 s): both bills → new Documents/Bills; essay → Essays; the film folder →
+Movies/Films (whole); lone files (shopping list, lab reminder, photo archive) → review. Lost compared with Phase 3: the
+two manuals ("router user guide", "appliance manual") no longer group, since "guide" and "manual" are different main
+words and grouping by meaning waits for D; each then wanted its own new folder, so both went to review. Images without
+text get no new name until C. The user chose to port `suggest`/`placeGroup` as interim JSON prompts (thinking on) until E.
+Correction to A: with full Xcode's Metal toolchain, `swift build` also builds MLX's shaders; `swift run` runs the model.
 - `MLXClassifier: FileClassifier`. The card prompt is the benchmark's Task 1, and one card call replaces
   `describe` + `suggestName`. `suggestUnpack` and `describeFolder` are ported to JSON prompts.
 - JSON schemas in prompts put `reason` first. Ollama/grammar lesson: field order changes decisions.

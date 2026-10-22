@@ -63,27 +63,15 @@ struct SettingsView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
 
-            Section("Apple's on-device model") {
+            Section {
                 Toggle("Use the model for files no rule can place", isOn: $model.settings.useModel)
                 LabeledContent("Status") {
                     if let reason = model.modelUnavailableReason {
-                        Label(reason, systemImage: "xmark.circle").foregroundStyle(.orange)
+                        Label(reason, systemImage: "xmark.circle").foregroundStyle(.orange).lineLimit(2)
                     } else {
-                        Label("Available\(model.modelSeesImages ? ", can look at images" : "")", systemImage: "checkmark.circle")
-                            .foregroundStyle(.green)
+                        Label("Ready", systemImage: "checkmark.circle").foregroundStyle(.green)
                     }
                 }
-                HStack {
-                    Button("Check Again") { model.refreshModelStatus() }
-                    Button("Open Apple Intelligence Settings") {
-                        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Siri-Settings.extension")!)
-                    }
-                }
-                Text("Runs entirely on this Mac. It only suggests; every answer is checked, and anything unsure goes to review. Turn it off to use rules only.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-
-            Section {
                 ForEach(ModelSpec.all) { spec in
                     LabeledContent {
                         modelStatusLabel(model.localModels.status[spec.id] ?? .notDownloaded)
@@ -109,7 +97,7 @@ struct SettingsView: View {
             } header: {
                 Text("On-device models (MLX)")
             } footer: {
-                Text("Downloaded once from Hugging Face, then everything runs on this Mac; no file ever leaves it. If a download is interrupted, the files that already finished are kept. The organizer starts using these models in a later update.")
+                Text("Downloaded once from Hugging Face, then everything runs on this Mac; no file ever leaves it. If a download is interrupted, the files that already finished are kept. The model only suggests: every answer is checked, anything unsure goes to review, and without the models files no rule can place go to review. Organize Now loads the model (about 5 GB of memory) and releases it when it's done.")
                     .font(.caption).foregroundStyle(.secondary)
             }
 
@@ -175,7 +163,11 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .onAppear { model.localModels.refresh() }  // the CLI may have downloaded them meanwhile
+        .onAppear {
+            // The CLI may have downloaded them meanwhile.
+            model.localModels.refresh()
+            model.refreshModelStatus()
+        }
         .scrollContentBackground(.hidden)
         .background(Theme.page)
     }

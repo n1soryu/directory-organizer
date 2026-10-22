@@ -104,17 +104,20 @@ public enum ClassifierError: Error, Equatable, CustomStringConvertible {
     case unavailable(String)
     /// The model declined to answer (safety guardrails, refusal).
     case declined(String)
+    /// The model's answers stayed invalid after the retries.
+    case invalidAnswer(String)
 
     public var description: String {
         switch self {
         case .unavailable(let why): "model unavailable: \(why)"
         case .declined(let why): "model declined: \(why)"
+        case .invalidAnswer(let why): "model gave no valid answer (\(why))"
         }
     }
 }
 
-/// Anything that can suggest where a file belongs and what to call it. Apple's on-device
-/// model implements it; tests use fakes. One protocol so models can be swapped and compared.
+/// Anything that can suggest where a file belongs and what to call it. `MLXClassifier`
+/// (Qwen3 on this Mac) implements it; tests use fakes. One protocol so models can be swapped and compared.
 public protocol FileClassifier: Sendable {
     var name: String { get }
     func suggest(_ request: ClassificationRequest) async throws -> ClassifierSuggestion

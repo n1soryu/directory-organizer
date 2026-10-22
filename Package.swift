@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "FileOrganizer",
-    // macOS 27: the on-device model accepts images from this version on (Milestone 3).
+    // macOS 27, Apple silicon (MLX runs the on-device models on the GPU).
     platforms: [.macOS("27.0")],
     products: [
         .executable(name: "organize", targets: ["organize"]),
@@ -23,8 +23,9 @@ let package = Package(
         .target(name: "OrganizerCore"),
 
         // The MLX engine: downloads, loads and runs the on-device models.
-        // Kept out of OrganizerCore so `swift test` never needs the GPU (it has no Metal shaders);
-        // only the app and the CLI link it, and they must be built with xcodebuild.
+        // Kept out of OrganizerCore, so the core and its tests never depend on the GPU or the
+        // models; only the app and the CLI link it. Its GPU shaders are built only when Xcode's
+        // Metal toolchain is installed.
         .target(
             name: "OrganizerMLX",
             dependencies: [

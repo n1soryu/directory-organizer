@@ -54,7 +54,7 @@ public struct GenerationOutput: Sendable, Equatable {
 }
 
 /// A local language model. Implemented with MLX in OrganizerMLX; faked in tests,
-/// because `swift test` can't run MLX (it has no Metal shaders).
+/// so they need neither the GPU nor the 5 GB of models.
 public protocol LanguageModel: Sendable {
     func continueChat(_ request: GenerationRequest) async throws -> GenerationOutput
 }

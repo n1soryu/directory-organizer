@@ -2,6 +2,7 @@ import AppKit
 import Foundation
 import Observation
 import OrganizerCore
+import OrganizerMLX
 import SwiftUI
 
 /// Something that happened, for the activity feed.
@@ -131,9 +132,8 @@ final class AppModel {
     private(set) var lastScan: Date?
     private(set) var lastScanDuration: TimeInterval?
     private(set) var isWatching = false
-    /// nil when Apple's model is available, otherwise why not.
+    /// nil when the language model (Qwen3 via MLX) can run, otherwise why not.
     private(set) var modelUnavailableReason: String?
-    private(set) var modelSeesImages = false
     var notificationStatus: Notifier.Status = .unknown
     /// The MLX models (downloaded in Settings; used from Milestone B on).
     let localModels = LocalModels()
@@ -350,8 +350,13 @@ final class AppModel {
         planner.onlyAddedAfter = settings.realUseSince
         planner.profiles = profiles
         planner.corrections = Correction.from(records, homeRoot: homeURL)
+        // A fresh engine per run: Qwen3 loads at the first model question and is released below.
+        var engine: MLXEngine?
         if settings.useModel, modelUnavailableReason == nil {
-            planner.classifier = AppleClassifier()
+            let mlx = MLXEngine(store: localModels.store)
+            let store = localModels.store
+            planner.classifier = MLXClassifier(model: mlx) { MLXEngine.unavailableReason(store: store) }
+            engine = mlx
         }
         let fullPlanner = planner
         let folder = watchedURL
@@ -399,6 +404,8 @@ final class AppModel {
                 show(.error, "Organize Now failed: \(error.localizedDescription)")
             }
         }
+        // Finished, failed or cancelled: give the memory back (~5 GB).
+        await engine?.unloadAll()
         // Fold the results into the plan (and catch up on anything that arrived meanwhile).
         if isScanning {
             scanRequested = true
@@ -556,14 +563,14 @@ final class AppModel {
     }
 
     func refreshModelStatus() {
-        modelUnavailableReason = AppleClassifier.unavailableReason()
-        modelSeesImages = AppleClassifier.canSeeImages
+        modelUnavailableReason = MLXEngine.unavailableReason(store: localModels.store)
     }
 
     func downloadModels() {
         log(.info, "Downloading the on-device models (\(localModels.missingBytes.fileSize))")
         localModels.downloadMissing { [weak self] failure in
             if let failure { self?.show(.error, failure) } else { self?.log(.success, "On-device models downloaded") }
+            self?.refreshModelStatus()
         }
     }
 

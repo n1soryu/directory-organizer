@@ -188,22 +188,3 @@ struct FakeClassifier: FileClassifier {
         #expect(summary.count < 600)
     }
 }
-
-/// Runs the real on-device model. Off by default (slow, needs Apple Intelligence):
-/// `FO_LIVE_MODEL=1 ./scripts/test.sh --filter LiveModel`
-@Suite(.enabled(if: ProcessInfo.processInfo.environment["FO_LIVE_MODEL"] == "1" && AppleClassifier.unavailableReason() == nil))
-struct LiveModelTests {
-    @Test func everyAnswerPassesTheChecks() async throws {
-        let root = FileManager.default.temporaryDirectory.appending(path: "file-organizer-live-\(UUID().uuidString)")
-        _ = try TestDataBuilder.build(at: root)
-        defer { try? FileManager.default.removeItem(at: root) }
-        var planner = Planner(homeRoot: root.appending(path: "Home"))
-        planner.classifier = AppleClassifier()
-        let plan = try await planner.plan(folder: root.appending(path: "Downloads"))
-        for action in plan.actions {
-            #expect(DestinationValidator.problem(with: action.destinationFolder, config: planner.config) == nil)
-        }
-        let essay = try #require(plan.actions.first { $0.originalName == "Climate essay draft.docx" })
-        #expect(essay.destinationFolder == "Documents/Essays")
-    }
-}

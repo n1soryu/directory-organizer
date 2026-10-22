@@ -82,7 +82,7 @@ extension LanguageModel {
     /// the model what was wrong. Errors from the model itself (not loaded, cancelled) are thrown.
     public func askJSON<T: Decodable & Sendable>(
         _ type: T.Type, messages: [ChatMessage], thinking: Bool, limits: ReplyLimits = .init(),
-        retries: Int = 2, check: (T) -> String? = { _ in nil }
+        retries: Int = 2, check: @Sendable (T) -> String? = { _ in nil }
     ) async throws -> JSONAnswer.Outcome<T> {
         var conversation = messages
         var outcome = JSONAnswer.Outcome<T>(value: nil, replies: [], problems: [])

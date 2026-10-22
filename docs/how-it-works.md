@@ -20,7 +20,7 @@ A wrong guess sends the file to the review folder; it is never lost.
 |---|---|---|
 | 1 | Fact extraction, rules engine, plan-only CLI, stub classifier | ✅ |
 | 2 | Apply moves, undo log, Finder tags, safety checks, creating folders and renaming | ✅ |
-| 3 | Apple's on-device model for leftovers: folders, new folders, names (text and images) | ✅ |
+| 3 | Apple's on-device model for leftovers: folders, new folders, names (text and images); replaced by Qwen3 (MLX B) | ✅ |
 | 4 | Menu-bar app + dashboard, Downloads watcher, approval UI, notifications, review reminder every 8 hours | ✅ |
 | 5 | Organize Now: the heavy work (text recognition + model) on demand from the menu bar | ✅ |
 | 6 | Evaluation on a labeled test set: rules only vs rules + model | |
@@ -35,9 +35,9 @@ A wrong guess sends the file to the review folder; it is never lost.
 
 ## Try it
 
-Needs macOS 27, Swift 6 and full Xcode with the Metal toolchain: `scripts/build-app.sh` uses
-`xcodebuild`, because only it compiles MLX's GPU shaders (`swift build` compiles MLX, but without
-them it can't run a model). One quirk:
+Needs macOS 27, Swift 6 and full Xcode with the Metal toolchain, which compiles MLX's GPU shaders
+(both `swift build` and `xcodebuild` do; without the toolchain the model can't run, and files no
+rule can place go to review). One quirk:
 the macOS 27 SDK declares SwiftUI's `@State` also as a macro whose plugin only ships with Xcode,
 so the app uses `@ViewState` (an alias for the property wrapper).
 
@@ -56,8 +56,8 @@ swift run organize log                       # history of moves and undos
 ./scripts/build-app.sh --open    # builds build/Directory Organizer.app and opens it
 ```
 
-It also builds the CLI as `build/cli/organize`, next to the same shader bundle. That's the one to
-use for `organize model-check [--download]`, which loads each MLX model and runs a short sample
+It also builds the CLI as `build/cli/organize`, next to the same shader bundle (`swift run organize`
+works as well). `organize model-check [--download]` loads each MLX model and runs a short sample
 (valid JSON, speed, memory). Settings → On-device models downloads them in the app; they're kept
 in `~/Library/Application Support/DirectoryOrganizer/Models`, pinned to fixed revisions.
 
@@ -132,11 +132,11 @@ were downloaded from, and the Finder tags most of them carry (2+ files and 60%+)
 
 ## Similar files, placed together (grouping)
 
-In Organize Now, every leftover (no rule, not a duplicate, readable) is first **described** by the
-model: what it is ("airfryer manual") and its general category, like a folder name ("User Manuals").
-**Code groups** them: same main word in the category ("Bills" / "Utility Bills") or in the
-description ("router manual" / "airfryer manual"), or descriptions close in meaning (Apple's
-on-device sentence embedding, distance < 0.6). Vague words (files, documents, misc) don't group.
+In Organize Now, every leftover (no rule, not a duplicate, readable) first gets a **card** from
+the model: its kind ("electricity bill"), issuer, subject, date, people, a suggested name and a
+one-line summary. **Code groups** them by the kind's main word ("electricity bill" / "gas bill").
+Vague words (files, documents, misc) don't group. (Grouping by meaning, with embeddings of the
+cards, comes with the catalog in MLX Milestone D; Apple's sentence embedding is gone.)
 
 - Each group of 2+ is **placed in one question**: the model sees all of them (up to 8) and picks an
   existing folder or a new one. Its answer goes through the same checks as a single file's.
@@ -144,7 +144,7 @@ on-device sentence embedding, distance < 0.6). Vague words (files, documents, mi
   or to one a group just created; a new folder of its own goes to review, even if another lone
   file picked the same name (that's chance, not a pattern).
 - Group names are deterministic: the most common category, on a tie the more general one.
-- `organize describe <file>…` prints what the model says a file is.
+- `organize describe <file>…` prints a file's card.
 
 What didn't work, measured with the real model (kept here so it isn't tried again):
 - Grouping by embeddings of the file text: the airfryer manual came out closer to a bill (0.87)
@@ -155,22 +155,30 @@ What didn't work, measured with the real model (kept here so it isn't tried agai
 - Example names in prompts ("Manuals", "Bills", later "Contracts", "Recipes") get copied as folder
   names for unrelated files. Prompt examples must not match the test data, and are best kept few.
 
-**Stalls:** every model answer has 90 s and every text recognition 30 s; a stalled call counts as
-"model unavailable" / "unreadable" (so: review), and Cancel still stops at once.
+**Stalls:** every text recognition has 30 s; a stalled one counts as "unreadable" (so: review).
+Model answers have no time limit but a length limit (4,096 thinking + 512 answer tokens), and
+Cancel stops them.
 
-## The model (Apple's on-device Foundation Models)
+## The model (Qwen3 8B, on this Mac with MLX)
 
-Used only where rules can't decide, and only ever *suggests*:
+`mlx-community/Qwen3-8B-4bit-DWQ`, downloaded once into
+`~/Library/Application Support/DirectoryOrganizer/Models` and pinned to a fixed revision. Organize Now
+loads it at its first question (about 5 GB of memory) and releases it at the end. Used only where
+rules can't decide, and only ever *suggests*:
 
-- **Leftover files:** first question: *what is this, and does one of these folders fit?* The answer
-  is constrained at generation time to the folders that exist (a schema built at runtime with
-  `DynamicGenerationSchema`), so it can't invent a path. If nothing fits, a second, simpler
-  question asks for a **new category folder** ("Manuals", "Bills").
-- **Unclear names:** for files a rule has already placed (`IMG_4821.png`, `download.pdf`), it
-  suggests a name. For images it **looks at the picture**. Images are dated: `2026-10-12 Router
-  wireless settings page.png`.
-- It never sees the file system and never acts. It receives a text summary of the facts (plus
-  the image itself for pictures), one fresh session per question, greedy (repeatable) sampling.
+- **Cards:** what a leftover file is (kind, issuer, subject, date, people, suggested name, summary),
+  thinking off, ~5 s. One card per file serves both grouping and naming.
+- **Leftover files:** *which folder fits, or which new category folder?* in one answer, with
+  thinking on (~1 min: the benchmark showed folder decisions need it). The folders are listed
+  with their purposes and examples, plus your corrections.
+- **Folders in Downloads:** keep together or unpack (thinking on); **your folders:** what each is for
+  (thinking off).
+- **Unclear names:** the card's suggested name, trusted only when the file has text. Images without
+  text keep their rule (`Pictures/Downloaded Images`) and name until the vision model (MLX C).
+- It never sees the file system and never acts. It receives a text summary of the facts, one fresh
+  chat per question, greedy (repeatable) sampling. Answers are JSON; one that's invalid (not JSON,
+  a folder that isn't on the list, a new folder under the wrong parent) is sent back with what's
+  wrong, at most twice, then the file goes to review.
 
 Swift then checks every answer:
 - the folder must be one that was offered, or a valid new folder (right parent for the file
@@ -180,16 +188,15 @@ Swift then checks every answer:
   "North South University" in the text, or a known course code.
 - **Tags come from the folder** (the ones most of its files carry), never from the model.
 - `Documents/Secure` only with high confidence; a guess goes to review instead.
-- The answer is generated in order *what is it → which folder's purpose matches and why →
-  folder*: a reason written after the choice would only defend it.
+- The answer starts with its `reason`: a reason written after the choice would only defend it.
 - **Unreadable is not clean:** if text recognition fails (it's retried once), the file can't be
   checked for sensitive text, so it goes to review, never into a folder as if it were safe.
-- confidence is chosen as high / medium / low (small models are poor at exact numbers):
+- confidence is chosen as high / medium / low (models are poor at exact numbers):
   0.9 / 0.75 / 0.4, with a threshold of 0.75. Below it, the file goes to review.
-- if Apple Intelligence is off or still downloading, leftovers simply go to review.
+- if the model isn't downloaded, or MLX's GPU shaders weren't built, leftovers simply go to review.
 - sensitive files (safety rules) are never renamed by the model.
 
-`organize model` shows whether the model is available; `--no-model` runs rules only.
+`organize model` shows whether the model can run; `--no-model` runs rules only.
 
 ## Safety, in code
 
@@ -255,7 +262,7 @@ The app splits the work in two:
   recognition, no model, so it takes seconds and barely uses the Mac. Courses, records, films,
   installers, password exports, duplicates and the like show up ready to approve right away.
 - **Organize Now, when you press it** (menu bar, dashboard toolbar, or ⇧⌘O). The heavy work:
-  text recognition for images and scanned PDFs, and Apple's model for files no rule fits and for
+  text recognition for images and scanned PDFs, and the model for files no rule fits and for
   unclear names, asked fresh. Progress shows in the menu bar (percentage, current file and step,
   elapsed time) with **Cancel** (⌘.); cancelling is safe because planning only reads. A
   notification summarizes the run, and its results stick to each file until it changes.
@@ -329,7 +336,9 @@ Sources/OrganizerCore/   facts, safety, rules, planning, applying (no UI)
   Naming/      unclear-name check, name cleaning, film/TV name parsing
   Safety/      sensitive-file detector, BIP-39 wordlist
   Rules/       rules engine and the rules above
-  Classify/    FileClassifier protocol, AppleClassifier (Foundation Models), FactSummary
+  Classify/    FileClassifier protocol, MLXClassifier (questions to Qwen3), FactSummary
+  LocalModels/ LanguageModel protocol, thinking budget, lenient JSON + retries, model list and store
+Sources/OrganizerMLX/    the MLX engine: downloads, loads and runs the models (GPU)
   Planning/    Planner (duplicates, clashes, new folders), DestinationValidator
   Apply/       Applier, Undoer, SafeMove, MoveJournal (write-ahead log), FinderTags
   Config/      folder layout, record types, NSU course catalog, FolderCatalog (folders offered to the model),

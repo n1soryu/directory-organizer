@@ -40,12 +40,12 @@ struct OverviewView: View {
 
     private var modelTitle: String {
         guard model.settings.useModel else { return "Model off" }
-        return model.modelUnavailableReason == nil ? "Apple model ready" : "Model unavailable"
+        return model.modelUnavailableReason == nil ? "Model ready" : "Model unavailable"
     }
 
     private var modelDetail: String {
         guard model.settings.useModel else { return "rules only" }
-        return model.modelUnavailableReason ?? (model.modelSeesImages ? "on-device · sees images" : "on-device")
+        return model.modelUnavailableReason ?? "on-device · \(ModelSpec.language.displayName)"
     }
 }
 

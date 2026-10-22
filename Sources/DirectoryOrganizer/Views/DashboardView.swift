@@ -103,7 +103,7 @@ struct StatusFooter: View {
             HStack(spacing: 6) {
                 Image(systemName: "sparkles")
                     .foregroundStyle(model.modelUnavailableReason == nil && model.settings.useModel ? .purple : .secondary)
-                Text(model.settings.useModel ? (model.modelUnavailableReason == nil ? "Apple model ready" : "Model unavailable") : "Model off")
+                Text(model.settings.useModel ? (model.modelUnavailableReason == nil ? "Model ready" : "Model unavailable") : "Model off")
             }
             if let last = model.lastScan {
                 Text("Last scan \(last.relative)")

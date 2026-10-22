@@ -3,7 +3,7 @@ import Testing
 @testable import OrganizerCore
 
 /// A language model that plays back scripted outputs and records what it was asked.
-/// MLX itself can't run under `swift test` (no Metal shaders); real runs are `organize model-check`.
+/// The tests never load a real model (5 GB, ~1 min per decision); real runs are `organize model-check`.
 final class ScriptedModel: LanguageModel, @unchecked Sendable {
     private let lock = NSLock()
     private var outputs: [GenerationOutput]

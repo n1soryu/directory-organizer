@@ -12,7 +12,6 @@ Run everything from the project folder: `cd ~/Developer/directory-organizer`.
 | `swift build` | Compile everything (first build takes ~30 s, later ones are quick) |
 | `./scripts/test.sh` | Run all tests |
 | `./scripts/test.sh --filter Apply` | Run only tests whose name contains "Apply" |
-| `FO_LIVE_MODEL=1 ./scripts/test.sh --filter LiveModel` | Also test against the real Apple model (slow; off by default) |
 | `swift run make-testdata` | (Re)build the sandbox: `TestData/Downloads` (26 fake downloads), `TestData/Home` (stand-in home folder), `TestData/expected.json` |
 | `rm -rf .build` | Clear the build cache if the build acts weird |
 
@@ -56,8 +55,8 @@ Both debug runs use a throwaway settings file, never your real one.
 | `swift run organize plan TestData/Downloads --json` | Same plan as JSON |
 | `swift run organize plan TestData/Downloads --no-model` | Full read, but rules only: files no rule can place go to review |
 | `swift run organize plan TestData/Downloads --quick` | What the app's automatic quick scan sees: no text recognition, no model; lists what waits for Organize Now |
-| `swift run organize model` | Is Apple's on-device model available (and can it see images)? |
-| `build/cli/organize model-check` | Load each MLX model and run one short sample: valid JSON, tokens per second, peak memory (needs `./scripts/build-app.sh` first) |
+| `swift run organize model` | Which models are downloaded, and can the model run here? |
+| `build/cli/organize model-check` | Load each MLX model and run one short sample: valid JSON, tokens per second, peak memory (`swift run organize model-check` works too) |
 | `build/cli/organize model-check --download` | The same, after downloading any missing model (~5 GB, once) |
 | `swift run organize apply TestData/Downloads` | Show the plan, then ask: **[a]** all · **[o]** one by one · **[c]** cancel |
 | `swift run organize apply TestData/Downloads --yes` | Apply everything without asking (`--no-model` works here too) |
@@ -67,7 +66,7 @@ Both debug runs use a throwaway settings file, never your real one.
 | `swift run organize undo --all` | Undo every move that's still in place |
 | `swift run organize log` | History of moves and undos, newest batch first |
 | `swift run organize facts "TestData/Downloads/scan0001.pdf"` | Everything the app read from one file (text, OCR, source URL, dates…) |
-| `swift run organize describe TestData/Downloads/*.pdf` | What Apple's model says each file is, and the category it groups it by |
+| `swift run organize describe TestData/Downloads/*.pdf` | Each file's card: kind, issuer, subject, suggested name |
 | `swift run organize help` | Usage |
 
 **Option for any command:** `--home <folder>` uses a different stand-in home folder. The defaults are
@@ -81,12 +80,12 @@ Both debug runs use a throwaway settings file, never your real one.
        85% · NSU · rule: course · Course ECO201: …    ← confidence · tags · who decided · why
 ```
 
-`model: apple` means Apple's model decided; "name suggested by the model" means a rule chose the
-folder and the model chose the name. With the model, a plan takes ~30-40 s for the sandbox
-(a few seconds per model question); `--no-model` takes a few seconds.
+`model: qwen3` means the model decided; "name suggested by the model" means a rule chose the
+folder and the model chose the name. With the model, a plan takes minutes: ~5 s per card and
+~1 min per folder decision (it thinks first); `--no-model` takes a few seconds.
 
-If the model isn't available: **System Settings → Siri** (on macOS 27 the Apple Intelligence
-settings are in the Siri pane), then `swift run organize model` to check again.
+If the model isn't available: download it (`organize model-check --download`, or the app's
+Settings), then `swift run organize model` to check again.
 
 Alert icons: 🔐 sensitive file · ♊️ duplicate (same content) · ⚠️ name clash (date added) ·
 ❓ unknown course code · ⛔️ destination rejected by the safety checks

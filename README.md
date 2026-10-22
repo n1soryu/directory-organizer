@@ -3,8 +3,8 @@
 # Directory Organizer
 
 An offline macOS menu-bar app that sorts your downloads into the right folders, renames unclear
-files and adds Finder tags. Simple rules handle the obvious cases; Apple's on-device model handles
-the rest. **Nothing moves until you approve it, and every move can be undone.**
+files and adds Finder tags. Simple rules handle the obvious cases; an on-device language model
+(Qwen3 8B, run with MLX) handles the rest. **Nothing moves until you approve it, and every move can be undone.**
 
 <img src="docs/images/overview.png" alt="Overview: what's ready, where it's headed, what needs attention">
 
@@ -17,7 +17,7 @@ the rest. **Nothing moves until you approve it, and every move can be undone.**
 - **Watches Downloads** and sorts new files within seconds with rules: course files by course code,
   NSU records (dated), FSAE files, films and TV (cleaned names), installers, code projects.
 - **Organize Now** (menu bar button) does the heavy work on demand: text recognition for images and
-  scans, and Apple's on-device model for files no rule fits and for unclear names. It can propose
+  scans, and the on-device model for files no rule fits and for unclear names. It can propose
   new category folders ("Manuals", "Bills").
 - **Folders too:** a downloaded folder is checked all the way down; the model decides whether it's
   one thing to keep together or a bag of files to unpack and sort one by one.
@@ -25,14 +25,16 @@ the rest. **Nothing moves until you approve it, and every move can be undone.**
   instead), duplicates by content hash only, password exports / recovery phrases / private keys
   detected and reported, every model answer checked against the folders that exist.
 - **Undo anything:** a write-ahead move log puts files back exactly as they were (name, folder, tags).
-- **Fully offline:** Apple's model runs on your Mac; nothing is uploaded.
+- **Fully offline:** the model runs on your Mac (downloaded once, ~5 GB); no file is ever uploaded.
 
 ## Install
 
 Download the latest `.zip` from [Releases](../../releases), unzip, and move the app to Applications.
 It isn't notarized, so the first time: right-click the app → **Open** → **Open**.
 
-Requires macOS 27 on Apple silicon; Apple Intelligence on for the model (System Settings → Siri).
+Requires macOS 27 on Apple silicon (16 GB of memory recommended). The model is downloaded once in
+**Settings → On-device models → Download Models** (~5 GB); until then, files no rule can place go
+to review.
 
 It starts on a test sandbox (`~/Developer/directory-organizer/TestData`, created with
 `swift run make-testdata`). To use it on your own files: **Settings → Switch to My Real Folders**.
@@ -49,10 +51,10 @@ swift run organize plan TestData/Downloads   # or use the command-line tool
 build/cli/organize model-check --download    # fetch the MLX models (~5 GB, once) and test them
 ```
 
-Needs full Xcode with the Metal toolchain: the app is built with `xcodebuild`, the only tool that
-compiles the GPU shaders of [MLX](https://github.com/ml-explore/mlx-swift), which will run the
-on-device models (see [docs/mlx-plan.md](docs/mlx-plan.md)). `swift run` still works for the CLI,
-except `model-check`.
+Needs full Xcode with the Metal toolchain: it compiles the GPU shaders of
+[MLX](https://github.com/ml-explore/mlx-swift), which runs the on-device model (Qwen3 8B, downloaded
+once in Settings; see [docs/mlx-plan.md](docs/mlx-plan.md)). The app is built with `xcodebuild`;
+`swift run organize …` works too.
 
 ## Docs
 

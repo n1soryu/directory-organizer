@@ -108,8 +108,8 @@ import Testing
         let folders = FolderCatalog.universal(config) + [
             FolderOption(path: "Documents/Bills", purpose: "electricity and water bills", tags: [], examples: ["desco_sep.pdf"]),
         ]
-        let prompt = AppleClassifier.instructions(folders: folders, review: config.reviewFolder,
-                                                  corrections: [Correction(fileName: "notes.txt", wrongFolder: "Documents/Bills").sentence])
+        let prompt = MLXClassifier.instructions(folders: folders, review: config.reviewFolder, newFolderParents: ["Documents"],
+                                                corrections: [Correction(fileName: "notes.txt", wrongFolder: "Documents/Bills").sentence])
         for personal in ["North South", "NSU", "Formula", "economics", "Bangladesh"] {
             #expect(!prompt.contains(personal), "\(personal) in the prompt")
         }

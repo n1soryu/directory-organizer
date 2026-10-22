@@ -7,12 +7,12 @@ import OrganizerCore
 
 public enum MLXEngineError: LocalizedError, Equatable {
     case notDownloaded(String)
-    case notLoaded(ModelSpec.Role)
+    case noShaders
 
     public var errorDescription: String? {
         switch self {
         case .notDownloaded(let name): "\(name) isn't downloaded yet (Settings → Download Models)"
-        case .notLoaded(let role): "no \(role.rawValue) model is loaded"
+        case .noShaders: "MLX's GPU shaders are missing (they're only built when full Xcode with its Metal toolchain is installed)"
         }
     }
 }
@@ -36,6 +36,29 @@ public actor MLXEngine: OrganizerCore.LanguageModel, OrganizerCore.TextEmbedder 
         self.store = store
     }
 
+    /// Whether MLX will find its compiled shaders. Without them its first GPU call aborts the
+    /// whole program (a build without Xcode's Metal toolchain has none), so this is checked
+    /// before any model is loaded.
+    /// The places mirror MLX's own search: next to the executable, or a bundle the app can see.
+    public static let shadersAvailable: Bool = {
+        let fm = FileManager.default
+        let bundle = "mlx-swift_Cmlx.bundle/Contents/Resources/default.metallib"
+        var folders = [Bundle.main.bundleURL, Bundle.main.resourceURL].compactMap { $0 }
+        folders += Bundle.allBundles.compactMap(\.resourceURL)
+        if let executable = Bundle.main.executableURL?.deletingLastPathComponent() {
+            if fm.fileExists(atPath: executable.appending(path: "mlx.metallib").path) { return true }
+            folders.append(executable)
+        }
+        return folders.contains { fm.fileExists(atPath: $0.appending(path: bundle).path) }
+    }()
+
+    /// nil if `spec` can run here; otherwise why not, in plain words.
+    public static func unavailableReason(_ spec: ModelSpec = .language, store: ModelStore = ModelStore()) -> String? {
+        if !shadersAvailable { return MLXEngineError.noShaders.localizedDescription }
+        if !store.isReady(spec) { return MLXEngineError.notDownloaded(spec.displayName).localizedDescription }
+        return nil
+    }
+
     public var loaded: [ModelSpec] {
         [language?.spec, embedder?.spec].compactMap { $0 }
     }
@@ -43,6 +66,7 @@ public actor MLXEngine: OrganizerCore.LanguageModel, OrganizerCore.TextEmbedder 
     /// Loads a downloaded model. A large model replaces the large one already loaded.
     public func load(_ spec: ModelSpec) async throws {
         guard !loaded.contains(spec) else { return }
+        guard Self.shadersAvailable else { throw MLXEngineError.noShaders }
         guard store.isReady(spec) else { throw MLXEngineError.notDownloaded(spec.displayName) }
         let downloader = HubDownloader(store: store, localOnly: true)
         let configuration = ModelConfiguration(id: spec.repo, revision: spec.revision)
@@ -65,14 +89,14 @@ public actor MLXEngine: OrganizerCore.LanguageModel, OrganizerCore.TextEmbedder 
         case .language: language = nil
         case .embedder: embedder = nil
         }
-        Memory.clearCache()
+        if Self.shadersAvailable { Memory.clearCache() }  // touching MLX without shaders would abort
     }
 
     /// Releases everything (the end of Organize Now).
     public func unloadAll() {
         language = nil
         embedder = nil
-        Memory.clearCache()
+        if Self.shadersAvailable { Memory.clearCache() }  // touching MLX without shaders would abort
     }
 
     public nonisolated func memory() -> GPUMemory {
@@ -88,7 +112,9 @@ public actor MLXEngine: OrganizerCore.LanguageModel, OrganizerCore.TextEmbedder 
     // MARK: - LanguageModel
 
     public func continueChat(_ request: GenerationRequest) async throws -> GenerationOutput {
-        guard let container = language?.container else { throw MLXEngineError.notLoaded(.language) }
+        // Loaded on first use (Organize Now's model phase); `unloadAll()` releases it.
+        if language == nil { try await load(.language) }
+        guard let container = language?.container else { throw MLXEngineError.notDownloaded(ModelSpec.language.displayName) }
         let start = Date()
         return try await container.perform { context in
             // UserInput isn't Sendable, so it's built here, inside the container.
@@ -132,7 +158,8 @@ public actor MLXEngine: OrganizerCore.LanguageModel, OrganizerCore.TextEmbedder 
     // MARK: - TextEmbedder
 
     public func embed(_ text: String) async throws -> [Float] {
-        guard let container = embedder?.container else { throw MLXEngineError.notLoaded(.embedder) }
+        if embedder == nil { try await load(.embedder) }
+        guard let container = embedder?.container else { throw MLXEngineError.notDownloaded(ModelSpec.embedder.displayName) }
         return await container.perform { context in
             var tokens = context.tokenizer.encode(text: text, addSpecialTokens: true)
             // Qwen3-Embedding pools the last token, which must be the end-of-text token.

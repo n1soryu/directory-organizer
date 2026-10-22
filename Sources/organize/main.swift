@@ -1,5 +1,6 @@
 import Foundation
 import OrganizerCore
+import OrganizerMLX
 
 let usage = """
     organize: sorts downloads into your folders. Nothing moves without your approval.
@@ -13,13 +14,14 @@ let usage = """
           Show the plan, ask for approval (all / one by one / cancel), then move and tag.
           --yes        approve everything without asking
           --no-model   rules only: files no rule can place go to review
+      Without the models, or without MLX's GPU shaders (built only when Xcode's Metal
+      toolchain is installed), files no rule can place go to review.
       organize model
-          Is Apple's on-device model available?
+          Can the on-device model (Qwen3 8B, via MLX) run here? Which models are downloaded?
       organize model-check [--download]
           Load each MLX model and run one short sample: valid JSON, speed, memory.
           --download   fetch missing models first (~5 GB, once)
-          Needs the xcodebuild binary (./scripts/build-app.sh → build/cli/organize);
-          `swift run` can't run MLX, because only xcodebuild compiles its GPU shaders.
+          Needs MLX's GPU shaders, which are built only when Xcode's Metal toolchain is installed.
       organize undo --last | --batch <id> | --all | <file name>  [--home <folder>]
           Put files back exactly as they were (original folder, name and tags).
       organize log [--home <folder>]
@@ -27,7 +29,7 @@ let usage = """
       organize facts <file>
           Show everything extracted from one file (as JSON).
       organize describe <file>...
-          What Apple's model says each file is, and the category it groups it by.
+          Each file's card: what Qwen3 says it is, and the name it suggests.
 
       --home   stand-in home folder (default: <folder>/../Home for plan/apply, TestData/Home otherwise)
       The move log is kept next to the home folder: <home>/../moves.jsonl
@@ -114,14 +116,19 @@ func makePlan(_ folder: URL, _ home: URL, useModel: Bool, quick: Bool = false) a
     let store = ProfileStore(forHome: home)
     planner.profiles = store.load()
     planner.corrections = Correction.from((try? journal(for: home).records()) ?? [], homeRoot: home)
+    var engine: MLXEngine?
     if useModel, !quick {
-        planner.classifier = AppleClassifier()
-        if let reason = AppleClassifier.unavailableReason() {
-            FileHandle.standardError.write(Data("note: Apple's model isn't available (\(reason)); files no rule can place go to review.\n".utf8))
+        if let reason = MLXEngine.unavailableReason() {
+            FileHandle.standardError.write(Data("note: the model can't run (\(reason)); files no rule can place go to review.\n".utf8))
+        } else {
+            let mlx = MLXEngine()
+            planner.classifier = MLXClassifier(model: mlx) { MLXEngine.unavailableReason() }
+            engine = mlx
         }
     }
     do {
         let plan = try await planner.plan(folder: folder)
+        await engine?.unloadAll()
         try? store.save(plan.profiles)
         return plan
     } catch {
@@ -203,11 +210,16 @@ case "log":
     printer.printLog(try log.records(), home: home)
 
 case "model":
-    if let reason = AppleClassifier.unavailableReason() {
-        print("Apple's on-device model: not available (\(reason)).")
-        print("Files no rule can place will go to review until it is.")
+    let store = ModelStore()
+    for spec in ModelSpec.all {
+        print("\(spec.displayName): \(store.isReady(spec) ? "downloaded" : "not downloaded") (\(spec.repo) @ \(spec.revision.prefix(7)))")
+    }
+    print("Models folder: \(store.directory.path)")
+    if let reason = MLXEngine.unavailableReason(store: store) {
+        print("The model can't run: \(reason).")
+        print("Files no rule can place go to review until it can.")
     } else {
-        print("Apple's on-device model: available\(AppleClassifier.canSeeImages ? ", can look at images" : "").")
+        print("The model can run.")
     }
 
 case "model-check":
@@ -228,16 +240,21 @@ case "facts":
 
 case "describe":
     guard !args.isEmpty else { fail("which files?") }
+    if let reason = MLXEngine.unavailableReason() { fail("the model can't run: \(reason)") }
+    let engine = MLXEngine()
+    let classifier = MLXClassifier(model: engine)
     for file in args.map(path) {
         refuseRealFolders(file.deletingLastPathComponent())
         let facts = await FactExtractor().facts(for: file)
         do {
-            let description = try await AppleClassifier().describe(facts)
-            print("\(file.lastPathComponent): \(description.kind) [\(description.category)]")
+            let card = try await classifier.card(for: facts)
+            print("\(file.lastPathComponent): \(card.line)")
+            print("  suggested name: \(card.suggestedName)\(card.date.map { "; date: \($0)" } ?? "")\(card.people.isEmpty ? "" : "; people: " + card.people.joined(separator: ", "))")
         } catch {
             print("\(file.lastPathComponent): \(error)")
         }
     }
+    await engine.unloadAll()
 
 case "-h", "--help", "help":
     print(usage)

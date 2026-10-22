@@ -1,8 +1,8 @@
 #!/bin/zsh
 # Builds build/Directory Organizer.app and the matching CLI, build/cli/organize (Apple silicon).
-# Uses xcodebuild, not `swift build`: only xcodebuild compiles MLX's GPU shaders
-# (mlx-swift_Cmlx.bundle/…/default.metallib), and without them the models can't run.
-# Needs full Xcode with the Metal toolchain.
+# Uses xcodebuild, which builds MLX's GPU shaders (mlx-swift_Cmlx.bundle/…/default.metallib);
+# without them the models can't run. Needs full Xcode with the Metal toolchain (with it,
+# `swift build` builds the shaders too).
 #   ./scripts/build-app.sh            release build
 #   ./scripts/build-app.sh --open     build, then launch it
 set -euo pipefail

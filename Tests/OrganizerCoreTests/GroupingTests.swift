@@ -11,14 +11,17 @@ import Testing
 
     func label(_ kind: String, _ category: String) -> FileDescription { FileDescription(kind: kind, category: category) }
 
-    @Test func groupsBySharedMainWordOrCloseMeaning() {
+    @Test func groupsBySharedMainWord() {
         let labels = [label("electricity bill", "Bills"), label("router manual", "Manuals"), label("water bill", "Utility Bills"),
-                      label("fryer guide", "Guides"), label("pancake recipe", "Recipes")]
-        // Pretend the two manual-ish labels are close in meaning; nothing else is.
-        let close: (String, String) -> Double? = { a, b in
-            Set([a, b]) == ["router manual", "fryer guide"] ? 0.4 : 1.0
-        }
-        #expect(Grouper.groups(labels, distance: close) == [[0, 2], [1, 3], [4]])
+                      label("fryer manual", "Guides"), label("pancake recipe", "Recipes"), label("fryer guide", "Guides")]
+        // Kinds or categories sharing a main word; "fryer guide" joins the manuals through "Guides".
+        #expect(Grouper.groups(labels) == [[1, 3, 5], [0, 2], [4]])
+    }
+
+    @Test func cardKindsGroupByTheirMainWord() {
+        // MLXClassifier passes the card's kind as both labels.
+        let labels = [label("gas bill", "gas bill"), label("lab report", "lab report"), label("electricity bill", "electricity bill")]
+        #expect(Grouper.groups(labels) == [[0, 2], [1]])
     }
 
     @Test func vagueCategoriesDontGroup() {
@@ -27,7 +30,7 @@ import Testing
         #expect(Grouper.mainWord("Documents") == nil)
         #expect(Grouper.mainWord("Misc") == nil)
         let labels = [label("note", "Files"), label("scan", "Other Files")]
-        #expect(Grouper.groups(labels, distance: { _, _ in nil }) == [[0], [1]])
+        #expect(Grouper.groups(labels) == [[0], [1]])
     }
 
     /// Labels by file name; places the Bills group in a new folder, says the Gadgets group
