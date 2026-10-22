@@ -59,6 +59,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         }
     }
 
+    /// Quitting while Organize Now runs waits for it to stop and release the model first;
+    /// exiting while MLX is still loading a model crashes.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard AppModel.shared.isOrganizeRunning else { return .terminateNow }
+        Task { @MainActor in
+            await AppModel.shared.stopForQuit()
+            NSApp.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
+    }
+
     /// Closing the dashboard leaves the app running in the menu bar.
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false

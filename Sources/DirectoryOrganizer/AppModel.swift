@@ -333,7 +333,8 @@ final class AppModel {
     /// The full run: text recognition for images and scans, the model for leftovers and
     /// unclear names, all asked fresh.
     func organizeNow() {
-        guard organizing == nil, !isLocked else { return }
+        // Also wait until the last run has released its model: never two models at once.
+        guard organizing == nil, organizeTask == nil, !isLocked else { return }
         organizing = FullRun()
         organizeTask = Task { await runFullOrganize() }
     }
@@ -341,6 +342,19 @@ final class AppModel {
     func cancelOrganize() {
         organizeTask?.cancel()
     }
+
+    /// Quitting during Organize Now: cancel it and wait until it has ended. A model that's still
+    /// loading can't be interrupted, and exiting under it crashes MLX (its GPU state is torn down
+    /// while the load still uses it); the run releases the model when it ends.
+    func stopForQuit() async {
+        guard let task = organizeTask else { return }
+        log(.info, "Quitting: stopping Organize Now first")
+        task.cancel()
+        await task.value
+    }
+
+    /// Organize Now is running, or still releasing the model.
+    var isOrganizeRunning: Bool { organizeTask != nil }
 
     private func runFullOrganize() async {
         while isScanning { try? await Task.sleep(for: .milliseconds(100)) }
@@ -406,6 +420,7 @@ final class AppModel {
         }
         // Finished, failed or cancelled: give the memory back (~5 GB).
         await engine?.unloadAll()
+        organizeTask = nil
         // Fold the results into the plan (and catch up on anything that arrived meanwhile).
         if isScanning {
             scanRequested = true

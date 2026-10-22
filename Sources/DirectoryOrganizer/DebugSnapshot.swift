@@ -48,8 +48,9 @@ enum DebugSnapshot {
                 try? await Task.sleep(for: .milliseconds(50))
             }
             await captureMenuBarView(model: model, to: "\(outDir)/menubar-running")
-            model.cancelOrganize()
-            NSApp.terminate(nil)
+            // Quit mid-run, the way the Quit command does: from the run loop, not from inside this
+            // main-actor task (the app then waits for the run, which needs the main actor).
+            NSApp.perform(#selector(NSApplication.terminate(_:)), with: nil, afterDelay: 0)
         }
         return true
     }
