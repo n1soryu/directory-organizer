@@ -17,23 +17,24 @@ files and adds Finder tags. Simple rules handle the obvious cases; an on-device 
 - **Watches Downloads** and sorts new files within seconds with rules: course files by course code,
   NSU records (dated), FSAE files, films and TV (cleaned names), installers, code projects.
 - **Organize Now** (menu bar button) does the heavy work on demand: text recognition for images and
-  scans, and the on-device model for files no rule fits and for unclear names. It can propose
-  new category folders ("Manuals", "Bills").
+  scans, a vision model that looks at images (a photographed receipt is filed like a receipt; a
+  photo gets a real name), and the on-device model for files no rule fits and for unclear names.
+  It can propose new category folders ("Manuals", "Bills").
 - **Folders too:** a downloaded folder is checked all the way down; the model decides whether it's
   one thing to keep together or a bag of files to unpack and sort one by one.
 - **Safety first, in code, not left to the model:** never deletes, never overwrites (dated names
   instead), duplicates by content hash only, password exports / recovery phrases / private keys
   detected and reported, every model answer checked against the folders that exist.
 - **Undo anything:** a write-ahead move log puts files back exactly as they were (name, folder, tags).
-- **Fully offline:** the model runs on your Mac (downloaded once, ~5 GB); no file is ever uploaded.
+- **Fully offline:** the models run on your Mac (downloaded once, ~8 GB); no file is ever uploaded.
 
 ## Install
 
 Download the latest `.zip` from [Releases](../../releases), unzip, and move the app to Applications.
 It isn't notarized, so the first time: right-click the app → **Open** → **Open**.
 
-Requires macOS 27 on Apple silicon (16 GB of memory recommended). The model is downloaded once in
-**Settings → On-device models → Download Models** (~5 GB); until then, files no rule can place go
+Requires macOS 27 on Apple silicon (16 GB of memory recommended). The models are downloaded once in
+**Settings → On-device models → Download Models** (~8 GB); until then, files no rule can place go
 to review.
 
 It starts on a test sandbox (`~/Developer/directory-organizer/TestData`, created with
@@ -48,12 +49,12 @@ swift run make-testdata              # sandbox: fake downloads + a stand-in home
 ./scripts/build-app.sh --open        # build and open the app
 ./scripts/test.sh                    # run the tests
 swift run organize plan TestData/Downloads   # or use the command-line tool
-build/cli/organize model-check --download    # fetch the MLX models (~5 GB, once) and test them
+build/cli/organize model-check --download    # fetch the MLX models (~8 GB, once) and test them
 ```
 
 Needs full Xcode with the Metal toolchain: it compiles the GPU shaders of
-[MLX](https://github.com/ml-explore/mlx-swift), which runs the on-device model (Qwen3 8B, downloaded
-once in Settings; see [docs/mlx-plan.md](docs/mlx-plan.md)). The app is built with `xcodebuild`;
+[MLX](https://github.com/ml-explore/mlx-swift), which runs the on-device models (Qwen3 8B, Qwen3-VL 4B for images and
+Qwen3 Embedding, downloaded once in Settings; see [docs/mlx-plan.md](docs/mlx-plan.md)). The app is built with `xcodebuild`;
 `swift run organize …` works too.
 
 ## Docs

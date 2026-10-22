@@ -30,12 +30,15 @@ struct VideoRule: Rule {
 }
 
 /// Downloaded images and screenshots. (Sorting into picture subfolders waits until
-/// you've planned that structure.)
+/// you've planned that structure.) An image the vision model saw as a document (a photographed
+/// receipt, a slide) is left to the model, to be filed with documents of its kind.
 struct ImageRule: Rule {
-    let name = "image"
+    static let ruleName = "image"
+    let name = ImageRule.ruleName
 
     func evaluate(_ facts: FileFacts, config: OrganizerConfig) -> Decision? {
         guard facts.kind == .image else { return nil }
+        if let card = facts.visionCard, ImageKinds.isDocument(card.kind) { return nil }
         var reason = facts.isScreenshot ? "Screenshot" : "Image"
         if facts.nameIsUnclear {
             reason += " (name unclear)"

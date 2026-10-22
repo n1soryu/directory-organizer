@@ -1,6 +1,6 @@
 # Plan: on-device models with MLX (language, vision, embeddings)
 
-Status: **Milestones A and B done** (2026-10-21/22); C is next. Plan written and approved 2026-10-21.
+Status: **Milestones A, B and C done** (2026-10-21/22); D is next. Plan written and approved 2026-10-21.
 Each milestone gets its own detailed plan, shown to the user before work begins, and ends with a commit.
 
 ## Why
@@ -40,11 +40,11 @@ Earlier decisions that still hold:
 | role | model | size | thinking | loaded when |
 |---|---|---|---|---|
 | Language: cards + decisions | `mlx-community/Qwen3-8B-4bit-DWQ` | 4.6 GB | off for cards, on for decisions | Organize Now, text phase |
-| Vision: cards for images | `Qwen3-VL-4B-Instruct` 4-bit (`VLMRegistry.qwen3VL4BInstruct4Bit`, or `mlx-community/Qwen3-VL-4B-Instruct-4bit`, 3.1 GB) | ~3 GB | n/a | Organize Now, image phase |
+| Vision: cards for images | `mlx-community/Qwen3-VL-4B-Instruct-4bit` | 3.1 GB | n/a | Organize Now, image phase |
 | Embeddings | `mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ` | 0.35 GB | n/a | all of Organize Now |
 
-The vision model choice is **provisional**: Milestone C starts with a small image evaluation
-comparing Qwen3-VL-4B and Gemma 3 4B (`mlx-community/gemma-3-4b-it-qat-4bit`, 3.0 GB), and the better one is kept.
+The vision model was chosen in Milestone C by a small image evaluation: Qwen3-VL-4B beat Gemma 3 4B
+(`mlx-community/gemma-3-4b-it-qat-4bit`, 3.0 GB).
 
 **Memory rule:** never load the vision model and the 8B together; 3 + 5.8 GB is too much on 16 GB.
 Organize Now runs the image phase first, unloads the vision model, then runs the text phase.
@@ -107,7 +107,28 @@ Correction to A: with full Xcode's Metal toolchain, `swift build` also builds ML
   settings UI, and the related tests. Update README / `docs/how-it-works.md`.
 - Settings shows model status: not downloaded / downloading / ready.
 
-### C. Vision model for images
+### C. Vision model for images — done 2026-10-22
+Outcome: `organize image-eval` (18 images: 5 photographed documents, 3 screenshots, a flowchart, a bar chart, a slide,
+6 of Apple's account pictures, a meme). First run: both models repeated the file name ("IMG_3310.jpg") for most
+pictures, because the prompt showed it; the name rule was changed to "a new, descriptive file name for what the image
+shows … never the current file name" (general wording, nothing from the set), and both were run again:
+
+| | Qwen3-VL 4B | Gemma 3 4B | Qwen3 8B on the OCR text (documents only) |
+|---|---|---|---|
+| kind (strict word match) | 10/18 (documents 7/8) | 7/18 (6/8) | 6/8 |
+| key fact | 18/18 | 17/18 | 8/8 |
+| usable new name | 18/18 | 18/18 | 8/8 |
+| sent the right way (document vs picture) | 18/18 | 16/18 | 6/8 |
+| valid JSON first try | 18/18 | 18/18 | 8/8 |
+| seconds per image | 2.8 (run 1), 5.4 (run 2) | 5.6, 7.8 | 7.9 |
+| peak memory | 4.2 GB | 3.8 GB | 5.2 GB |
+
+Qwen3-VL kept. Photos rarely get "photo" as their kind (it says "guitar", "flower"), which the strict kind score
+counts as wrong but the document/picture split handles. Every image goes to the vision model: the 8B on OCR text was no
+better on documents and slower. Sandbox (`organize plan`, 6.5–8 min, peak footprint 6.4 GB, so the two large models
+were never loaded together): `IMG_4821.png` → "2026-10-22 colorful ovals.png", the screenshot → "2026-10-22 router
+wireless settings.png" (model names now lose their underscores); everything else as in B. Gemma 3 stays downloaded (~3 GB in the models folder) until the user removes it.
+Plan as approved:
 1. **Image evaluation first:** a small, fixed set of images (photos of receipts/documents, screenshots,
    plain photos, memes, diagrams) with expected kinds, built in TestDataKit and never used as prompt examples.
    Compare Qwen3-VL-4B vs Gemma 3 4B on card accuracy, speed and memory, then keep the winner.

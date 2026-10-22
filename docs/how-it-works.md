@@ -104,7 +104,9 @@ Music folders until real use is switched on deliberately.
 9. **Videos**: films → `Movies/Films/Avengers Infinity War.mpeg`, episodes →
    `Movies/TV Shows/<Show>/Show S01E04.mkv`, short clips → `Movies/Clips`. Release clutter
    (4K, BluRay, x265 …) is removed; a year is kept only if it was in the name.
-10. **Images** → `Pictures/Downloaded Images`
+10. **Images** → `Pictures/Downloaded Images`. In Organize Now the vision model looks at them first:
+    a document-like image (receipt, bill, ticket, letter, chart, slide…) skips this rule and is
+    decided like a document; a picture (photo, meme, screenshot of an app) stays here, with a real name.
 11. Anything else → the model (below). If it's unavailable or unsure: review.
 
 ## Your folders, learned (folder profiles)
@@ -159,6 +161,17 @@ What didn't work, measured with the real model (kept here so it isn't tried agai
 Model answers have no time limit but a length limit (4,096 thinking + 512 answer tokens), and
 Cancel stops them.
 
+## The vision model (Qwen3-VL 4B, for images)
+
+`mlx-community/Qwen3-VL-4B-Instruct-4bit` (3.1 GB), chosen over Gemma 3 4B by `organize image-eval`
+(see docs/mlx-plan.md, Milestone C). Organize Now's **image phase** comes first: the images only the
+image rule would place (not sensitive, not duplicates) get a card, from the picture (shrunk to at most
+1,024 px a side) plus any text recognition found, thinking off, ~3–6 s each. Then the vision model is
+released, before Qwen3 8B loads: the two never share memory (the engine has one slot for a large
+model). An image it can't describe, or every image when it isn't downloaded, goes by the image rule.
+The card's kind decides the way: document words (receipt, bill, ticket, letter, chart, slide…) send
+the image to the folder decision; anything else is a picture.
+
 ## The model (Qwen3 8B, on this Mac with MLX)
 
 `mlx-community/Qwen3-8B-4bit-DWQ`, downloaded once into
@@ -173,8 +186,8 @@ rules can't decide, and only ever *suggests*:
   with their purposes and examples, plus your corrections.
 - **Folders in Downloads:** keep together or unpack (thinking on); **your folders:** what each is for
   (thinking off).
-- **Unclear names:** the card's suggested name, trusted only when the file has text. Images without
-  text keep their rule (`Pictures/Downloaded Images`) and name until the vision model (MLX C).
+- **Unclear names:** the card's suggested name, trusted when the file has text or the vision model
+  saw it.
 - It never sees the file system and never acts. It receives a text summary of the facts, one fresh
   chat per question, greedy (repeatable) sampling. Answers are JSON; one that's invalid (not JSON,
   a folder that isn't on the list, a new folder under the wrong parent) is sent back with what's
@@ -263,7 +276,7 @@ The app splits the work in two:
   installers, password exports, duplicates and the like show up ready to approve right away.
 - **Organize Now, when you press it** (menu bar, dashboard toolbar, or ⇧⌘O). The heavy work:
   text recognition for images and scanned PDFs, and the model for files no rule fits and for
-  unclear names, asked fresh. Progress shows in the menu bar (percentage, current file and step,
+  unclear names, asked fresh. Images are looked at by the vision model first. Progress shows in the menu bar (percentage, current file and step,
   elapsed time) with **Cancel** (⌘.); cancelling is safe because planning only reads. A
   notification summarizes the run, and its results stick to each file until it changes.
 
@@ -336,14 +349,15 @@ Sources/OrganizerCore/   facts, safety, rules, planning, applying (no UI)
   Naming/      unclear-name check, name cleaning, film/TV name parsing
   Safety/      sensitive-file detector, BIP-39 wordlist
   Rules/       rules engine and the rules above
-  Classify/    FileClassifier protocol, MLXClassifier (questions to Qwen3), FactSummary
+  Classify/    FileClassifier protocol, MLXClassifier (questions to Qwen3), VisionCardWriter (image cards),
+               FactSummary
   LocalModels/ LanguageModel protocol, thinking budget, lenient JSON + retries, model list and store
 Sources/OrganizerMLX/    the MLX engine: downloads, loads and runs the models (GPU)
   Planning/    Planner (duplicates, clashes, new folders), DestinationValidator
   Apply/       Applier, Undoer, SafeMove, MoveJournal (write-ahead log), FinderTags
   Config/      folder layout, record types, NSU course catalog, FolderCatalog (folders offered to the model),
                FolderProfile (what your folders hold, learned)
-Sources/TestDataKit/     generates realistic fake downloads + expected results
+Sources/TestDataKit/     generates realistic fake downloads + expected results, and the vision evaluation's image set
 Sources/organize/        the CLI (plan, apply, undo, log, model, facts)
 Sources/DirectoryOrganizer/  the menu-bar app: AppModel (state, scans, moves), Views/ (dashboard pages)
   App/ (in OrganizerCore) FolderWatcher (FSEvents), AppSettings, AutoApplyPolicy, ReviewReminder

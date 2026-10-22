@@ -26,12 +26,15 @@ public struct GenerationRequest: Sendable, Equatable {
     /// Text the model's turn already starts with. Empty for a fresh answer.
     public var prefix: String
     public var maxTokens: Int
+    /// An image the model sees with the first user message (vision models only).
+    public var image: URL?
 
-    public init(messages: [ChatMessage], thinking: Bool, prefix: String = "", maxTokens: Int) {
+    public init(messages: [ChatMessage], thinking: Bool, prefix: String = "", maxTokens: Int, image: URL? = nil) {
         self.messages = messages
         self.thinking = thinking
         self.prefix = prefix
         self.maxTokens = maxTokens
+        self.image = image
     }
 }
 
@@ -54,7 +57,8 @@ public struct GenerationOutput: Sendable, Equatable {
 }
 
 /// A local language model. Implemented with MLX in OrganizerMLX; faked in tests,
-/// so they need neither the GPU nor the 5 GB of models.
+/// so they need neither the GPU nor the 5 GB of models. A vision model is one too:
+/// its requests carry an image.
 public protocol LanguageModel: Sendable {
     func continueChat(_ request: GenerationRequest) async throws -> GenerationOutput
 }

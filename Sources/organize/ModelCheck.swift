@@ -1,4 +1,7 @@
+import CoreGraphics
+import CoreText
 import Foundation
+import ImageIO
 import OrganizerCore
 import OrganizerMLX
 
@@ -55,7 +58,20 @@ func runModelCheck(download: Bool) async {
     }
     await engine.unload(.language)
 
-    // 3. Embeddings: two related sentences should be closer than an unrelated one.
+    // 3. An image card from the vision model: a made-up library notice, drawn here.
+    let picture = FileManager.default.temporaryDirectory.appending(path: "model-check-\(UUID().uuidString).png")
+    if drawNotice(to: picture) {
+        let facts = await FactExtractor().facts(for: picture)
+        failures += await check("Image card", engine: engine, spec: .vision) {
+            let outcome = try await VisionCardWriter(model: engine).ask(for: facts)
+            return (outcome.value.map { "kind: \($0.kind); issuer: \($0.issuer ?? "–"); name: \($0.suggestedName)" }, outcome)
+        }
+    } else {
+        print("\nImage card: ✗ couldn't draw the sample image"); failures += 1
+    }
+    await engine.unload(.vision)
+
+    // 4. Embeddings: two related sentences should be closer than an unrelated one.
     do {
         print("\nEmbeddings (\(ModelSpec.embedder.displayName))")
         engine.resetPeakMemory()
@@ -117,7 +133,7 @@ private func check<T: Sendable>(_ title: String, engine: MLXEngine, spec: ModelS
     }
 }
 
-@MainActor private enum ModelCheckProgress {
+@MainActor enum ModelCheckProgress {
     static var last: [String: Int] = [:]
 
     static func show(_ spec: ModelSpec, _ fraction: Double) {
@@ -126,6 +142,27 @@ private func check<T: Sendable>(_ title: String, engine: MLXEngine, spec: ModelS
         last[spec.id] = percent
         FileHandle.standardError.write(Data("\rDownloading \(spec.displayName): \(percent)%   \(percent == 100 ? "\n" : "")".utf8))
     }
+}
+
+/// A plain notice with a few lines of text, as a PNG.
+private func drawNotice(to url: URL) -> Bool {
+    guard let context = CGContext(data: nil, width: 900, height: 600, bitsPerComponent: 8, bytesPerRow: 0,
+                                  space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)
+    else { return false }
+    context.setFillColor(CGColor(gray: 1, alpha: 1))
+    context.fill(CGRect(x: 0, y: 0, width: 900, height: 600))
+    let text = "Riverside Public Library\n\nYour library card expires on 30 November 2026.\nRenew it at any branch with proof of address."
+    let attributes: [NSAttributedString.Key: Any] = [
+        NSAttributedString.Key(kCTFontAttributeName as String): CTFontCreateWithName("Helvetica" as CFString, 34, nil),
+    ]
+    let framesetter = CTFramesetterCreateWithAttributedString(NSAttributedString(string: text, attributes: attributes))
+    let frame = CTFramesetterCreateFrame(framesetter, CFRange(location: 0, length: 0),
+                                         CGPath(rect: CGRect(x: 60, y: 60, width: 780, height: 480), transform: nil), nil)
+    CTFrameDraw(frame, context)
+    guard let image = context.makeImage(),
+          let destination = CGImageDestinationCreateWithURL(url as CFURL, "public.png" as CFString, 1, nil) else { return false }
+    CGImageDestinationAddImage(destination, image, nil)
+    return CGImageDestinationFinalize(destination)
 }
 
 private func cosine(_ a: [Float], _ b: [Float]) -> Float {

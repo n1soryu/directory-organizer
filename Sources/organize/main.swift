@@ -22,6 +22,10 @@ let usage = """
           Load each MLX model and run one short sample: valid JSON, speed, memory.
           --download   fetch missing models first (~5 GB, once)
           Needs MLX's GPU shaders, which are built only when Xcode's Metal toolchain is installed.
+      organize image-eval [--download | --images-only]
+          Developer tool: compare the vision models on a built-in image set (docs/mlx-plan.md, C).
+          --download      fetch missing models first (~3 GB each, once)
+          --images-only   just build the image set (in a new temporary folder) to look at
       organize undo --last | --batch <id> | --all | <file name>  [--home <folder>]
           Put files back exactly as they were (original folder, name and tags).
       organize log [--home <folder>]
@@ -123,6 +127,12 @@ func makePlan(_ folder: URL, _ home: URL, useModel: Bool, quick: Bool = false) a
         } else {
             let mlx = MLXEngine()
             planner.classifier = MLXClassifier(model: mlx) { MLXEngine.unavailableReason() }
+            if let reason = MLXEngine.unavailableReason(.vision) {
+                FileHandle.standardError.write(Data("note: \(reason); images go by the image rule.\n".utf8))
+            } else {
+                // The image phase: the vision model is released before the text model loads.
+                planner.imageCards = VisionCardWriter(model: mlx) { await mlx.unload(.vision) }
+            }
             engine = mlx
         }
     }
@@ -228,6 +238,13 @@ case "model-check":
         fail("model-check takes only --download")
     }
     await runModelCheck(download: arguments.flags.contains("--download"))
+
+case "image-eval":
+    let arguments = Arguments(args)
+    guard arguments.positional.isEmpty, arguments.flags.isSubset(of: ["--download", "--images-only"]) else {
+        fail("image-eval takes only --download or --images-only")
+    }
+    await runImageEval(download: arguments.flags.contains("--download"), imagesOnly: arguments.flags.contains("--images-only"))
 
 case "facts":
     let arguments = Arguments(args)

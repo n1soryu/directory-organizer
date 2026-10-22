@@ -205,12 +205,15 @@ struct ModelStoreTests {
     let store = ModelStore(directory: FileManager.default.temporaryDirectory.appending(path: "models-\(UUID().uuidString)"))
 
     @Test func modelsArePinnedToCommits() {
-        for spec in ModelSpec.all {
+        for spec in ModelSpec.all + ModelSpec.visionCandidates {
             #expect(spec.revision.count == 40 && spec.revision.allSatisfy(\.isHexDigit), "\(spec.repo) isn't pinned")
         }
         #expect(ModelSpec.language.repo == "mlx-community/Qwen3-8B-4bit-DWQ")
         #expect(ModelSpec.embedder.repo == "mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ")
-        #expect(ModelSpec.all.filter(\.role.isLarge).count == 1)
+        #expect(ModelSpec.visionCandidates.contains(ModelSpec.vision))
+        // The language and the vision model share the one large slot; the embedder sits beside it.
+        #expect(ModelSpec.all.map(\.role) == [.language, .vision, .embedder])
+        #expect(ModelSpec.all.map(\.role.isLarge) == [true, true, false])
     }
 
     @Test func readyOnlyWithMarkerAndFiles() throws {
@@ -221,7 +224,7 @@ struct ModelStoreTests {
         #expect(!store.isReady(spec))
         try store.markReady(spec)
         #expect(store.isReady(spec))
-        #expect(store.missing() == [.language])
+        #expect(store.missing() == [.language, .vision])
         // Someone deleted the files: no longer ready.
         try FileManager.default.removeItem(at: store.directory.appending(path: "models--mlx-community--Qwen3-Embedding-0.6B-4bit-DWQ"))
         #expect(!store.isReady(spec))

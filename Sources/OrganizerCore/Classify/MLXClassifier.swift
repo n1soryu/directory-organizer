@@ -80,7 +80,7 @@ public actor MLXClassifier: FileClassifier {
 
     /// The file's card, asked once per file and kept for the rest of the run.
     public func card(for facts: FileFacts) async throws -> FileCard {
-        if let card = cards[facts.url] { return card }
+        if let card = facts.visionCard ?? cards[facts.url] { return card }
         if facts.kind == .image, !Self.hasText(facts) {
             // Nothing to read; describing a picture needs the vision model (Milestone C).
             throw ClassifierError.unavailable("an image without text needs the vision model")
@@ -109,8 +109,10 @@ public actor MLXClassifier: FileClassifier {
 
     public func suggestName(for facts: FileFacts) async throws -> NameSuggestion {
         let card = try await card(for: facts)
-        // A name from the file's own text is trustworthy; one from its name and type alone isn't.
-        return NameSuggestion(title: card.suggestedName, confidence: Self.hasText(facts) ? 0.9 : 0.5)
+        // A name from the file's own text, or from what the vision model saw, is trustworthy;
+        // one from its name and type alone isn't.
+        let seen = facts.visionCard != nil || Self.hasText(facts)
+        return NameSuggestion(title: card.suggestedName, confidence: seen ? 0.9 : 0.5)
     }
 
     // MARK: - Where does this file go? (interim, until the catalog decisions of Milestone E)

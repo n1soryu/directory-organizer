@@ -9,6 +9,8 @@ public struct Planner: Sendable {
     public var extractor = FactExtractor()
     public var rules = RulesEngine.standard
     public var classifier: any FileClassifier = StubClassifier()
+    /// The vision model's cards for images (Organize Now). Without it, images go by the image rule.
+    public var imageCards: (any ImageCardWriter)?
     public var mode: Mode = .full
     /// If set, items that arrived in the folder before this date are left alone entirely
     /// (not read, not listed): only new downloads are organized.
@@ -45,8 +47,9 @@ public struct Planner: Sendable {
         /// 0...1 for the whole run: each step has its own stretch of the bar.
         public var fraction: Double {
             let (start, width): (Double, Double) = switch step {
-            case .reading: (0, 0.35)
-            case .learning: (0.35, 0.1)
+            case .reading: (0, 0.3)
+            case .describingImages: (0.3, 0.1)
+            case .learning: (0.4, 0.05)
             case .grouping: (0.45, 0.2)
             case .deciding: (0.65, 0.35)
             }
@@ -57,6 +60,7 @@ public struct Planner: Sendable {
             case learning = "Learning your folders"
             case grouping = "Finding similar files"
             case reading = "Reading"
+            case describingImages = "Describing images"
             case deciding = "Deciding"
         }
     }
@@ -119,6 +123,11 @@ public struct Planner: Sendable {
 
         var hashes = HashCache()
         let copies = duplicatesWithinBatch(facts, &hashes)
+        // Organize Now: the vision model looks at the images first, in a phase of its own, and is
+        // released before the text model is needed again: the two never fit in memory together.
+        if mode == .full, let imageCards {
+            facts = try await describingImages(facts, copies: copies, writer: imageCards, progress: progress)
+        }
         var reserved = Set<String>()
         let learned = try await learnedProfiles(progress: progress)
         let folders = FolderCatalog.options(profiles: learned, config: config)
@@ -172,6 +181,30 @@ public struct Planner: Sendable {
         return plan
     }
 
+    /// Images only the image rule would place (not sensitive, not a duplicate, readable) get a card
+    /// from the vision model. An image it can't describe keeps going by the image rule.
+    func describingImages(_ facts: [FileFacts], copies: [URL: URL], writer: any ImageCardWriter,
+                          progress: (@Sendable (Progress) -> Void)?) async throws -> [FileFacts] {
+        var facts = facts
+        let images = facts.indices.filter { index in
+            let item = facts[index]
+            guard item.kind == .image, copies[item.url] == nil, !item.needsDeepRead,
+                  case .rule(ImageRule.ruleName)? = rules.decide(item, config: config)?.source else { return false }
+            return true
+        }
+        guard !images.isEmpty else { return facts }
+        for (step, index) in images.enumerated() {
+            if Task.isCancelled {
+                await writer.finish()
+                throw CancellationError()
+            }
+            progress?(Progress(done: step, total: images.count, file: facts[index].name, step: .describingImages))
+            facts[index].visionCard = try? await writer.card(for: facts[index])
+        }
+        await writer.finish()
+        return facts
+    }
+
     /// A new folder needs at least this many files of the same kind; the model may not make a
     /// folder for one file. (A one-off goes to an existing folder, or to review.)
     public var minimumNewFolderFiles = 2
@@ -223,7 +256,7 @@ public struct Planner: Sendable {
             for member in members {
                 var decision = shared
                 decision.reason = "One of \(members.count) similar files (\(category): \(names)). \(decision.reason)"
-                if member.nameIsUnclear, wantsName(decision, member) {
+                if needsName(member), wantsName(decision, member) {
                     decision = await named(decision, member)
                 }
                 result[member.url] = decision
@@ -362,7 +395,7 @@ public struct Planner: Sendable {
         }
         if var decision = ruled {
             decision = checked(decision)
-            if decision.newBaseName == nil, facts.nameIsUnclear, wantsName(decision, facts) {
+            if decision.newBaseName == nil, needsName(facts), wantsName(decision, facts) {
                 if mode == .full {
                     decision = await named(decision, facts)
                 } else {
@@ -522,6 +555,12 @@ public struct Planner: Sendable {
         return decision.destination != config.reviewFolder && facts.kind != .video && !facts.isDirectory
     }
 
+    /// An unclear name, or a screenshot's "Screenshot 2026-10-12 at 21.14.03" once the vision model
+    /// has seen what it shows.
+    private func needsName(_ facts: FileFacts) -> Bool {
+        facts.nameIsUnclear || (facts.isScreenshot && facts.visionCard != nil)
+    }
+
     private func named(_ decision: Decision, _ facts: FileFacts) async -> Decision {
         var decision = decision
         do {
@@ -547,10 +586,14 @@ public struct Planner: Sendable {
     }
 
     /// A model-suggested name, cleaned up, or nil if it's no good.
-    static func validTitle(_ raw: String) -> String? {
+    public static func validTitle(_ raw: String) -> String? {
         var title = raw.trimmingCharacters(in: CharacterSet(charactersIn: " \"'`.\n"))
         // Models sometimes add an extension anyway.
         title = title.replacingOccurrences(of: #"\.[A-Za-z0-9]{2,5}$"#, with: "", options: .regularExpression)
+        // "Greenleaf_Grocers_2026-09-14" → "Greenleaf Grocers 2026-09-14".
+        title = title.replacingOccurrences(of: "_", with: " ")
+            .replacingOccurrences(of: #" {2,}"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespaces)
         title = FileNames.sanitize(title)
         let words = title.split(separator: " ").count
         guard (1...12).contains(words), title.filter(\.isLetter).count >= 3, !NameQuality.isUnclear(title) else { return nil }

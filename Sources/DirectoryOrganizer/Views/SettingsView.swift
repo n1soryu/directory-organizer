@@ -97,7 +97,7 @@ struct SettingsView: View {
             } header: {
                 Text("On-device models (MLX)")
             } footer: {
-                Text("Downloaded once from Hugging Face, then everything runs on this Mac; no file ever leaves it. If a download is interrupted, the files that already finished are kept. The model only suggests: every answer is checked, anything unsure goes to review, and without the models files no rule can place go to review. Organize Now loads the model (about 5 GB of memory) and releases it when it's done.")
+                Text("Downloaded once from Hugging Face, then everything runs on this Mac; no file ever leaves it. If a download is interrupted, the files that already finished are kept. The model only suggests: every answer is checked, anything unsure goes to review, and without the models files no rule can place go to review. Organize Now loads one model at a time (at most about 6 GB of memory): the vision model for images first, then Qwen3 for the rest, and releases them when it's done. Without the vision model, images go to Downloaded Images as before.")
                     .font(.caption).foregroundStyle(.secondary)
             }
 

@@ -47,6 +47,9 @@ public struct FileFacts: Codable, Sendable {
     /// Something sensitive found while reading more of the file than `text` keeps (secrets
     /// past the excerpt the model sees).
     public var sensitive: SensitiveFinding?
+    /// Images only: what the vision model saw (Organize Now's image phase). A document-like image
+    /// is then filed like a document; a picture still goes to Downloaded Images, with a real name.
+    public var visionCard: FileCard?
 
     public enum TextSource: String, Codable, Sendable {
         case content, pdfText, pdfOCR, office, imageOCR

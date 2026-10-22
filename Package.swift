@@ -33,6 +33,7 @@ let package = Package(
                 .product(name: "MLX", package: "mlx-swift"),
                 .product(name: "MLXLLM", package: "mlx-swift-lm"),
                 .product(name: "MLXLMCommon", package: "mlx-swift-lm"),
+                .product(name: "MLXVLM", package: "mlx-swift-lm"),
                 .product(name: "MLXEmbedders", package: "mlx-swift-lm"),
                 .product(name: "HuggingFace", package: "swift-huggingface"),
                 .product(name: "Tokenizers", package: "swift-transformers"),
@@ -44,7 +45,7 @@ let package = Package(
         .target(name: "TestDataKit", dependencies: ["OrganizerCore"]),
 
         // Milestone 1 command-line tool: `organize plan <folder>`.
-        .executableTarget(name: "organize", dependencies: ["OrganizerCore", "OrganizerMLX"]),
+        .executableTarget(name: "organize", dependencies: ["OrganizerCore", "OrganizerMLX", "TestDataKit"]),
 
         .executableTarget(name: "make-testdata", dependencies: ["TestDataKit"]),
 

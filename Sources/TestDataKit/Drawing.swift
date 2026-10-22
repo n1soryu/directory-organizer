@@ -65,7 +65,7 @@ enum Drawing {
 
     // MARK: - Helpers
 
-    private static func bitmap(width: Int, height: Int, draw: (CGContext) -> Void) -> CGImage? {
+    static func bitmap(width: Int, height: Int, draw: (CGContext) -> Void) -> CGImage? {
         guard let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
                                       space: CGColorSpaceCreateDeviceRGB(),
                                       bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else { return nil }
@@ -75,7 +75,7 @@ enum Drawing {
         return context.makeImage()
     }
 
-    private static func drawText(_ text: String, in rect: CGRect, context: CGContext, fontSize: CGFloat) {
+    static func drawText(_ text: String, in rect: CGRect, context: CGContext, fontSize: CGFloat) {
         let font = CTFontCreateWithName("Helvetica" as CFString, fontSize, nil)
         let attributes: [NSAttributedString.Key: Any] = [
             NSAttributedString.Key(kCTFontAttributeName as String): font,
@@ -86,7 +86,7 @@ enum Drawing {
         CTFrameDraw(frame, context)
     }
 
-    private static func write(_ image: CGImage, type: UTType, to url: URL) throws {
+    static func write(_ image: CGImage, type: UTType, to url: URL) throws {
         guard let destination = CGImageDestinationCreateWithURL(url as CFURL, type.identifier as CFString, 1, nil) else {
             throw CocoaError(.fileWriteUnknown)
         }

@@ -57,7 +57,9 @@ Both debug runs use a throwaway settings file, never your real one.
 | `swift run organize plan TestData/Downloads --quick` | What the app's automatic quick scan sees: no text recognition, no model; lists what waits for Organize Now |
 | `swift run organize model` | Which models are downloaded, and can the model run here? |
 | `build/cli/organize model-check` | Load each MLX model and run one short sample: valid JSON, tokens per second, peak memory (`swift run organize model-check` works too) |
-| `build/cli/organize model-check --download` | The same, after downloading any missing model (~5 GB, once) |
+| `build/cli/organize model-check --download` | The same, after downloading any missing model (~8 GB, once) |
+| `build/cli/organize image-eval [--download]` | Developer tool: compare the vision models (Qwen3-VL 4B, Gemma 3 4B) on a built-in image set: kind, key fact, name, document-or-picture, speed, memory |
+| `build/cli/organize image-eval --images-only` | Just build that image set in a new temporary folder, to look at it |
 | `swift run organize apply TestData/Downloads` | Show the plan, then ask: **[a]** all · **[o]** one by one · **[c]** cancel |
 | `swift run organize apply TestData/Downloads --yes` | Apply everything without asking (`--no-model` works here too) |
 | `swift run organize undo --last` | Put back the most recent batch exactly as it was |
@@ -82,7 +84,7 @@ Both debug runs use a throwaway settings file, never your real one.
 
 `model: qwen3` means the model decided; "name suggested by the model" means a rule chose the
 folder and the model chose the name. With the model, a plan takes minutes: ~5 s per card and
-~1 min per folder decision (it thinks first); `--no-model` takes a few seconds.
+~1 min per folder decision (it thinks first), and ~3–6 s per image for the vision model; `--no-model` takes a few seconds.
 
 If the model isn't available: download it (`organize model-check --download`, or the app's
 Settings), then `swift run organize model` to check again.

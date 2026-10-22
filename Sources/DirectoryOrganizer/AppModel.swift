@@ -364,12 +364,16 @@ final class AppModel {
         planner.onlyAddedAfter = settings.realUseSince
         planner.profiles = profiles
         planner.corrections = Correction.from(records, homeRoot: homeURL)
-        // A fresh engine per run: Qwen3 loads at the first model question and is released below.
+        // A fresh engine per run. The vision model loads for the images first and is released
+        // before Qwen3 loads at the first text question; everything is released below.
         var engine: MLXEngine?
         if settings.useModel, modelUnavailableReason == nil {
             let mlx = MLXEngine(store: localModels.store)
             let store = localModels.store
             planner.classifier = MLXClassifier(model: mlx) { MLXEngine.unavailableReason(store: store) }
+            if MLXEngine.unavailableReason(.vision, store: store) == nil {
+                planner.imageCards = VisionCardWriter(model: mlx) { await mlx.unload(.vision) }
+            }
             engine = mlx
         }
         let fullPlanner = planner

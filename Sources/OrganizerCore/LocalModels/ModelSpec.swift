@@ -7,11 +7,13 @@ public struct ModelSpec: Sendable, Hashable, Codable, Identifiable {
     public enum Role: String, Sendable, Codable {
         /// Writes cards and makes decisions.
         case language
+        /// Writes cards for images.
+        case vision
         /// Turns cards into vectors for finding similar files.
         case embedder
 
         /// Big models share one slot: only one is ever loaded (16 GB Macs can't hold two).
-        public var isLarge: Bool { self == .language }
+        public var isLarge: Bool { self != .embedder }
     }
 
     /// Hugging Face repository, "org/name".
@@ -45,8 +47,24 @@ public struct ModelSpec: Sendable, Hashable, Codable, Identifiable {
         revision: "6c3ae70858513f1a78e9cdca3cae330d9075cd2a",
         role: .embedder, displayName: "Qwen3 Embedding 0.6B", downloadBytes: 349_558_958)
 
-    /// Everything "Download models" fetches. The vision model joins in Milestone C.
-    public static let all: [ModelSpec] = [language, embedder]
+    /// The two vision models compared by `organize image-eval` (docs/mlx-plan.md, Milestone C).
+    public static let qwen3VL = ModelSpec(
+        repo: "mlx-community/Qwen3-VL-4B-Instruct-4bit",
+        revision: "2fd8dacbdb8f1e54b8c005f081ec5bf79c56376b",
+        role: .vision, displayName: "Qwen3-VL 4B", downloadBytes: 3_109_729_929)
+
+    public static let gemma3 = ModelSpec(
+        repo: "mlx-community/gemma-3-4b-it-qat-4bit",
+        revision: "3d9ef289111449933c22761961f16a5df237ce2a",
+        role: .vision, displayName: "Gemma 3 4B", downloadBytes: 3_034_683_375)
+
+    public static let visionCandidates: [ModelSpec] = [qwen3VL, gemma3]
+
+    /// The vision model the app uses: the winner of the image evaluation.
+    public static let vision = qwen3VL
+
+    /// Everything "Download models" fetches.
+    public static let all: [ModelSpec] = [language, vision, embedder]
 }
 
 /// Where downloaded models live, and which of them are complete.
