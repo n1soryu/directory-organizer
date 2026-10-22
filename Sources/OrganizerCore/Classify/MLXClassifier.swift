@@ -80,7 +80,7 @@ public actor MLXClassifier: FileClassifier {
 
     /// The file's card, asked once per file and kept for the rest of the run.
     public func card(for facts: FileFacts) async throws -> FileCard {
-        if let card = facts.visionCard ?? cards[facts.url] { return card }
+        if let card = facts.visionCard ?? facts.knownCard ?? cards[facts.url] { return card }
         if facts.kind == .image, !Self.hasText(facts) {
             // Nothing to read; describing a picture needs the vision model (Milestone C).
             throw ClassifierError.unavailable("an image without text needs the vision model")

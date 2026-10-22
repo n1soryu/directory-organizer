@@ -11,6 +11,9 @@ public struct Planner: Sendable {
     public var classifier: any FileClassifier = StubClassifier()
     /// The vision model's cards for images (Organize Now). Without it, images go by the image rule.
     public var imageCards: (any ImageCardWriter)?
+    /// The catalog of carded files (Organize Now). Without it, similar files are found by shared
+    /// words, nothing is catalogued, and every leftover is carded afresh.
+    public var catalog: CatalogContext?
     public var mode: Mode = .full
     /// If set, items that arrived in the folder before this date are left alone entirely
     /// (not read, not listed): only new downloads are organized.
@@ -47,8 +50,9 @@ public struct Planner: Sendable {
         /// 0...1 for the whole run: each step has its own stretch of the bar.
         public var fraction: Double {
             let (start, width): (Double, Double) = switch step {
-            case .reading: (0, 0.3)
-            case .describingImages: (0.3, 0.1)
+            case .reading: (0, 0.25)
+            case .describingImages: (0.25, 0.1)
+            case .cataloguing: (0.35, 0.05)
             case .learning: (0.4, 0.05)
             case .grouping: (0.45, 0.2)
             case .deciding: (0.65, 0.35)
@@ -61,6 +65,7 @@ public struct Planner: Sendable {
             case grouping = "Finding similar files"
             case reading = "Reading"
             case describingImages = "Describing images"
+            case cataloguing = "Cataloguing earlier files"
             case deciding = "Deciding"
         }
     }
@@ -125,8 +130,20 @@ public struct Planner: Sendable {
         let copies = duplicatesWithinBatch(facts, &hashes)
         // Organize Now: the vision model looks at the images first, in a phase of its own, and is
         // released before the text model is needed again: the two never fit in memory together.
+        var earlier: [EarlierFile] = []
+        if mode == .full, let catalog {
+            facts = reusingCards(facts, copies: copies, hashes: &hashes, catalog: catalog.catalog)
+            earlier = await earlierFiles(catalog)
+        }
         if mode == .full, let imageCards {
-            facts = try await describingImages(facts, copies: copies, writer: imageCards, progress: progress)
+            let described = try await describingImages(facts, copies: copies, writer: imageCards,
+                                                       earlier: earlier.map(\.facts), progress: progress)
+            facts = described.facts
+            for index in earlier.indices { earlier[index].facts = described.earlier[index] }
+        }
+        var catalogEntries: [CatalogEntry] = []
+        if mode == .full, let catalog {
+            catalogEntries += try await cataloguingEarlier(earlier, context: catalog, progress: progress)
         }
         var reserved = Set<String>()
         let learned = try await learnedProfiles(progress: progress)
@@ -135,8 +152,13 @@ public struct Planner: Sendable {
         var actions: [ProposedAction] = []
         var waiting: [WaitingItem] = []
         // Organize Now: the model says what each leftover is; similar ones are placed together.
+        var embedded: [URL: Embedded]?
+        if mode == .full, let catalog {
+            embedded = try await embeddingLeftovers(facts, copies: copies, context: catalog, progress: progress)
+        }
         let grouped = mode == .full
-            ? try await groupDecisions(facts, copies: copies, folders: folders, newFolders: &newFolders, progress: progress)
+            ? try await groupDecisions(facts, copies: copies, folders: folders, newFolders: &newFolders,
+                                       embedded: embedded, progress: progress)
             : [:]
         var decided: [(item: FileFacts, decision: Decision)] = []
 
@@ -172,37 +194,55 @@ public struct Planner: Sendable {
             actions.append(resolve(item, decision, &hashes, &reserved))
         }
         progress?(Progress(done: facts.count, total: facts.count, file: "", step: .deciding))
+        if let catalog {
+            catalogEntries += await runEntries(facts, actions: actions, embedded: embedded ?? [:], hashes: &hashes,
+                                               context: catalog)
+        }
 
         var plan = Plan(createdAt: Date(), inputFolder: folder, homeRoot: homeRoot, actions: actions,
                         skipped: skipped.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending },
                         waiting: waiting)
         plan.unpacked = unpacked
         plan.profiles = learned
+        plan.catalogEntries = catalogEntries
         return plan
     }
 
     /// Images only the image rule would place (not sensitive, not a duplicate, readable) get a card
     /// from the vision model. An image it can't describe keeps going by the image rule.
+    /// `earlier`: images the app filed before, carded for the catalog in the same phase.
     func describingImages(_ facts: [FileFacts], copies: [URL: URL], writer: any ImageCardWriter,
-                          progress: (@Sendable (Progress) -> Void)?) async throws -> [FileFacts] {
+                          earlier: [FileFacts] = [],
+                          progress: (@Sendable (Progress) -> Void)?) async throws -> (facts: [FileFacts], earlier: [FileFacts]) {
         var facts = facts
+        var earlier = earlier
         let images = facts.indices.filter { index in
             let item = facts[index]
-            guard item.kind == .image, copies[item.url] == nil, !item.needsDeepRead,
+            guard item.kind == .image, item.visionCard == nil, copies[item.url] == nil, !item.needsDeepRead,
                   case .rule(ImageRule.ruleName)? = rules.decide(item, config: config)?.source else { return false }
             return true
         }
-        guard !images.isEmpty else { return facts }
+        let earlierImages = earlier.indices.filter { earlier[$0].kind == .image && !earlier[$0].needsDeepRead }
+        guard !images.isEmpty || !earlierImages.isEmpty else { return (facts, earlier) }
+        let total = images.count + earlierImages.count
         for (step, index) in images.enumerated() {
             if Task.isCancelled {
                 await writer.finish()
                 throw CancellationError()
             }
-            progress?(Progress(done: step, total: images.count, file: facts[index].name, step: .describingImages))
+            progress?(Progress(done: step, total: total, file: facts[index].name, step: .describingImages))
             facts[index].visionCard = try? await writer.card(for: facts[index])
         }
+        for (step, index) in earlierImages.enumerated() {
+            if Task.isCancelled {
+                await writer.finish()
+                throw CancellationError()
+            }
+            progress?(Progress(done: images.count + step, total: total, file: earlier[index].name, step: .describingImages))
+            earlier[index].visionCard = try? await writer.card(for: earlier[index])
+        }
         await writer.finish()
-        return facts
+        return (facts, earlier)
     }
 
     /// A new folder needs at least this many files of the same kind; the model may not make a
@@ -214,7 +254,7 @@ public struct Planner: Sendable {
     /// aren't alike, and files alike with nothing else, aren't in the result: they're placed
     /// one by one as before.
     func groupDecisions(_ facts: [FileFacts], copies: [URL: URL], folders: [FolderOption],
-                        newFolders: inout [String: String],
+                        newFolders: inout [String: String], embedded: [URL: Embedded]? = nil,
                         progress: (@Sendable (Progress) -> Void)?) async throws -> [URL: Decision] {
         let leftovers = facts.filter {
             copies[$0.url] == nil && !$0.needsDeepRead && rules.decide($0, config: config) == nil
@@ -231,7 +271,11 @@ public struct Planner: Sendable {
         }
 
         var result: [URL: Decision] = [:]
-        for group in Grouper.groups(described.map(\.description)) where group.count >= minimumNewFolderFiles {
+        // Similar in meaning (embeddings) when the catalog is in use; otherwise sharing a main word.
+        let groups = embedded.map { vectors in
+            SimilarityGrouper.groups(described.map { vectors[$0.facts.url]?.vector ?? [] })
+        } ?? Grouper.groups(described.map(\.description))
+        for group in groups where group.count >= minimumNewFolderFiles {
             try Task.checkCancellation()
             let members = group.map { described[$0].facts }
             // The category most members share names the group; on a tie the more general

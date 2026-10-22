@@ -50,6 +50,8 @@ public struct FileFacts: Codable, Sendable {
     /// Images only: what the vision model saw (Organize Now's image phase). A document-like image
     /// is then filed like a document; a picture still goes to Downloaded Images, with a real name.
     public var visionCard: FileCard?
+    /// A card from an earlier run, found in the catalog by the file's hash: not asked again.
+    public var knownCard: FileCard?
 
     public enum TextSource: String, Codable, Sendable {
         case content, pdfText, pdfOCR, office, imageOCR

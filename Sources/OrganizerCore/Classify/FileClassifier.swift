@@ -130,9 +130,16 @@ public protocol FileClassifier: Sendable {
     func describe(_ facts: FileFacts) async throws -> FileDescription
     /// One folder for a group of similar files.
     func placeGroup(_ request: GroupRequest) async throws -> GroupSuggestion
+    /// What a file is, in full (kind, issuer, subject, summary...): what the catalog keeps.
+    func card(for facts: FileFacts) async throws -> FileCard
 }
 
 extension FileClassifier {
+    /// Without a model there are no cards, and nothing is catalogued.
+    public func card(for facts: FileFacts) async throws -> FileCard {
+        throw ClassifierError.unavailable("no model in use")
+    }
+
     /// Without a model a folder is never unpacked: it stays together.
     public func suggestUnpack(for facts: FileFacts) async throws -> UnpackSuggestion {
         throw ClassifierError.unavailable("no model in use")

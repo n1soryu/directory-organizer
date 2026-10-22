@@ -1,6 +1,6 @@
 # Plan: on-device models with MLX (language, vision, embeddings)
 
-Status: **Milestones A, B and C done** (2026-10-21/22); D is next. Plan written and approved 2026-10-21.
+Status: **Milestones A–D done** (2026-10-21/22); E is next. Plan written and approved 2026-10-21.
 Each milestone gets its own detailed plan, shown to the user before work begins, and ends with a commit.
 
 ## Why
@@ -137,7 +137,19 @@ Plan as approved:
 3. Organize Now gets a separate image phase (load VLM → cards → unload) before the text phase.
 4. The rules for images (`Pictures/Downloaded Images`) become the fallback only when no vision model is available.
 
-### D. Embeddings and the catalog
+### D. Embeddings and the catalog — done 2026-10-22
+Outcome: built as below, with one change the user approved: an entry's state (filed / waiting / undone / gone) is
+not stored but worked out from the move log and the disk at read time, so the Applier and Undoer are unchanged and the
+two can never disagree; a file is recognised by its hash (re-carding revives a gone file). A file carded again after
+an undo (back in Downloads) counts as waiting. Back-fill/catch-up: up to 40 earlier app-filed files per run, not safety
+cases or the review folder. Grouping: nearest neighbour at ≥ 0.75 (fixed beforehand), the model confirms.
+Sandbox: run 1 6 min 58 s (11 files carded and catalogued, peak 6.7 GB; no back-fill, since every earlier sandbox move
+had been undone); run 2 5 min 46 s with every card reused. The two manuals are each other's nearest neighbours but at
+0.72, below the cut-off (unrelated pairs 0.58–0.64), so they still don't group; the cut-off was not lowered to fit the
+sandbox. E's decision prompt shows the top 5 neighbours with no cut-off, which is where they meet. Apply → all 11
+reported filed at their new paths (renames included); undo → undone.
+
+Plan as approved:
 **What gets embedded:** the card (`kind: …; issuer: …; subject: …; summary: …`), not the raw text. It exists for
 every file type, including images through the vision card, and separated matches slightly better in the benchmark
 (0.89 vs 0.87 average top score). Raw text is the fallback when the card call fails.

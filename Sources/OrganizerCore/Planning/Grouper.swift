@@ -3,7 +3,7 @@ import Foundation
 /// Finds files of the same kind among the model's descriptions: categories with the same main
 /// word ("Bills", "Utility Bills") or kinds with the same main word ("router manual",
 /// "airfryer manual"). Code does the grouping; the model only wrote the labels.
-/// (Similar in meaning, not just in words, comes with the catalog's embeddings: Milestone D.)
+/// Used only without the catalog; with it, `SimilarityGrouper` finds files similar in meaning.
 public enum Grouper {
     /// Main words too vague to group by.
     static let vague: Set<String> = ["file", "document", "item", "misc", "miscellaneou", "miscellaneous", "other", "stuff",

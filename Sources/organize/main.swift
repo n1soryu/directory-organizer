@@ -32,6 +32,10 @@ let usage = """
           List moves and undos, newest first.
       organize facts <file>
           Show everything extracted from one file (as JSON).
+      organize catalog [--home <folder>]
+          The catalog: every file carded so far, filed / waiting / undone / gone.
+      organize similar <file> [--home <folder>]
+          The 5 catalogued files most similar to <file> in meaning, with their scores.
       organize describe <file>...
           Each file's card: what Qwen3 says it is, and the name it suggests.
 
@@ -133,6 +137,11 @@ func makePlan(_ folder: URL, _ home: URL, useModel: Bool, quick: Bool = false) a
                 // The image phase: the vision model is released before the text model loads.
                 planner.imageCards = VisionCardWriter(model: mlx) { await mlx.unload(.vision) }
             }
+            if let reason = MLXEngine.unavailableReason(.embedder) {
+                FileHandle.standardError.write(Data("note: \(reason); similar files are found by shared words, and nothing is catalogued.\n".utf8))
+            } else {
+                planner.catalog = catalogContext(home: home, embedder: mlx)
+            }
             engine = mlx
         }
     }
@@ -140,10 +149,31 @@ func makePlan(_ folder: URL, _ home: URL, useModel: Bool, quick: Bool = false) a
         let plan = try await planner.plan(folder: folder)
         await engine?.unloadAll()
         try? store.save(plan.profiles)
+        do {
+            try CatalogStore(forHome: home).append(plan.catalogEntries)
+        } catch {
+            FileHandle.standardError.write(Data("note: couldn't save \(plan.catalogEntries.count) catalog entries: \(error.localizedDescription)\n".utf8))
+        }
         return plan
     } catch {
         fail("couldn't read \(folder.path): \(error.localizedDescription)")
     }
+}
+
+/// The catalog as it is now, read with the move log that tells where each file went.
+func catalog(home: URL) -> (catalog: Catalog, records: [MoveRecord], damaged: Int) {
+    let store = CatalogStore(forHome: home)
+    let log = journal(for: home)
+    _ = try? log.recover()
+    let records = (try? log.records()) ?? []
+    let entries = (try? store.entries()) ?? []
+    return (Catalog(entries: entries, records: records, embedder: ModelSpec.embedder.id), records,
+            (try? store.damagedLineCount()) ?? 0)
+}
+
+func catalogContext(home: URL, embedder: MLXEngine) -> CatalogContext {
+    let read = catalog(home: home)
+    return CatalogContext(catalog: read.catalog, records: read.records, embedder: embedder, embedderID: ModelSpec.embedder.id)
 }
 
 var args = Array(CommandLine.arguments.dropFirst())
@@ -254,6 +284,62 @@ case "facts":
     refuseRealFolders(file.deletingLastPathComponent())
     let facts = await FactExtractor().facts(for: file)
     print(String(decoding: try encoder().encode(facts), as: UTF8.self))
+
+case "catalog":
+    let arguments = Arguments(args)
+    let home = arguments.home()
+    let read = catalog(home: home)
+    let items = read.catalog.items
+    print("Catalog: \(CatalogStore(forHome: home).url.path)")
+    for state in [CatalogItem.State.filed, .waiting, .undone, .gone] {
+        let matching = items.filter { $0.state == state }
+        guard !matching.isEmpty else { continue }
+        print("\n\(state.rawValue) (\(matching.count))")
+        for item in matching {
+            let shown = item.path.replacingOccurrences(of: home.deletingLastPathComponent().path + "/", with: "")
+            print("  \(shown)\n      \(item.entry.cardSource.rawValue) · \(item.entry.line.prefix(110))")
+        }
+    }
+    if items.isEmpty { print("\nNothing catalogued yet: Organize Now (or organize plan) catalogues the files it cards.") }
+    if !read.catalog.stale.isEmpty { print("\n\(read.catalog.stale.count) made by another embedder: embedded again at the next run") }
+    if read.damaged > 0 { print("\n\(read.damaged) damaged line(s) skipped") }
+
+case "similar":
+    let arguments = Arguments(args)
+    guard let target = arguments.positional.first.map(path) else { fail("which file?") }
+    let home = arguments.home()
+    refuseRealFolders(target.deletingLastPathComponent())
+    let read = catalog(home: home)
+    let hash = try? FileHash.sha256(target)
+    var vector = hash.flatMap { h in read.catalog.items.first { $0.entry.sha256 == h }?.vector }
+    let engine = MLXEngine()
+    if vector == nil {
+        // Not catalogued yet: card it and embed the card, as Organize Now would.
+        if let reason = MLXEngine.unavailableReason() ?? MLXEngine.unavailableReason(.embedder) {
+            fail("it isn't catalogued, and the models can't run: \(reason)")
+        }
+        let facts = await FactExtractor().facts(for: target)
+        var card: FileCard?
+        if facts.kind == .image, MLXEngine.unavailableReason(.vision) == nil {
+            card = try? await VisionCardWriter(model: engine).card(for: facts)
+            await engine.unload(.vision)
+        } else {
+            card = try? await MLXClassifier(model: engine).card(for: facts)
+        }
+        guard let line = card.map(CatalogEntry.line(for:)) ?? CatalogEntry.line(forText: facts.text) else {
+            fail("nothing to compare: no card and no text")
+        }
+        print("\(target.lastPathComponent): \(line)")
+        vector = try? await engine.embed(line)
+    }
+    guard let vector else { fail("couldn't embed it") }
+    let nearest = read.catalog.nearest(to: vector, k: 5, excluding: hash)
+    if nearest.isEmpty { print("Nothing in the catalog to compare with yet.") }
+    for (item, score) in nearest {
+        let shown = item.path.replacingOccurrences(of: home.deletingLastPathComponent().path + "/", with: "")
+        print(String(format: "  %.2f  ", score) + "\(item.state.rawValue): \(shown)\n        \(item.entry.line.prefix(110))")
+    }
+    await engine.unloadAll()
 
 case "describe":
     guard !args.isEmpty else { fail("which files?") }

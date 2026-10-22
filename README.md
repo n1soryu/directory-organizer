@@ -20,6 +20,8 @@ files and adds Finder tags. Simple rules handle the obvious cases; an on-device 
   scans, a vision model that looks at images (a photographed receipt is filed like a receipt; a
   photo gets a real name), and the on-device model for files no rule fits and for unclear names.
   It can propose new category folders ("Manuals", "Bills").
+- **Remembers what it has seen:** a local catalog of short descriptions and embeddings finds similar
+  files by meaning ("router user guide" and "airfryer manual") and never describes a file twice.
 - **Folders too:** a downloaded folder is checked all the way down; the model decides whether it's
   one thing to keep together or a bag of files to unpack and sort one by one.
 - **Safety first, in code, not left to the model:** never deletes, never overwrites (dated names

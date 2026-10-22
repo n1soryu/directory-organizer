@@ -90,6 +90,14 @@ struct SettingsView: View {
                     Button("Show in Finder", systemImage: "folder") { model.reveal(model.localModels.store.directory) }
                         .disabled(!FileManager.default.fileExists(atPath: model.localModels.store.directory.path))
                 }
+                LabeledContent("Catalog") {
+                    HStack {
+                        Text("\(model.catalogCounts.filed) filed · \(model.catalogCounts.waiting) waiting")
+                        Button("Show in Finder", systemImage: "folder") { model.reveal(model.catalogStore.url) }
+                            .labelStyle(.iconOnly)
+                            .disabled(!FileManager.default.fileExists(atPath: model.catalogStore.url.path))
+                    }
+                }
                 if let free = model.localModels.freeBytes, !model.localModels.allReady {
                     Text("\(free.fileSize) free on this Mac; the download needs \(model.localModels.missingBytes.fileSize) plus 1 GB to spare.")
                         .font(.caption).foregroundStyle(.secondary)
@@ -97,7 +105,7 @@ struct SettingsView: View {
             } header: {
                 Text("On-device models (MLX)")
             } footer: {
-                Text("Downloaded once from Hugging Face, then everything runs on this Mac; no file ever leaves it. If a download is interrupted, the files that already finished are kept. The model only suggests: every answer is checked, anything unsure goes to review, and without the models files no rule can place go to review. Organize Now loads one model at a time (at most about 6 GB of memory): the vision model for images first, then Qwen3 for the rest, and releases them when it's done. Without the vision model, images go to Downloaded Images as before.")
+                Text("Downloaded once from Hugging Face, then everything runs on this Mac; no file ever leaves it. If a download is interrupted, the files that already finished are kept. The model only suggests: every answer is checked, anything unsure goes to review, and without the models files no rule can place go to review. Organize Now loads one model at a time (at most about 6 GB of memory): the vision model for images first, then Qwen3 for the rest, and releases them when it's done. Without the vision model, images go to Downloaded Images as before. The catalog keeps a short description and an embedding of each file the models looked at (never sensitive files), so similar files are found by meaning and nothing is described twice.")
                     .font(.caption).foregroundStyle(.secondary)
             }
 

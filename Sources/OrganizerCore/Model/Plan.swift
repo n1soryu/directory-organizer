@@ -64,6 +64,13 @@ public struct Plan: Codable, Sendable {
     public var unpacked: [URL] = []
     /// Your folders as this plan saw them, with purposes learned so far: keep them for next time.
     public var profiles: [FolderProfile] = []
+    /// New catalog entries (files carded and embedded by this run): append them to the catalog.
+    /// Not part of the plan's JSON.
+    public var catalogEntries: [CatalogEntry] = []
+
+    enum CodingKeys: String, CodingKey {
+        case createdAt, inputFolder, homeRoot, actions, skipped, waiting, unpacked, profiles
+    }
 
     public var alerts: [(action: ProposedAction, alert: Alert)] {
         actions.flatMap { action in action.alerts.map { (action, $0) } }

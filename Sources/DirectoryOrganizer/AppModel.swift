@@ -123,6 +123,9 @@ final class AppModel {
     private(set) var organizing: FullRun?
     private(set) var lastFullRun: FullRunSummary?
     private(set) var records: [MoveRecord] = []
+    /// Files in the catalog that can be offered as similar (filed + waiting), for Settings.
+    private(set) var catalogCounts: (filed: Int, waiting: Int) = (0, 0)
+    var catalogStore: CatalogStore { CatalogStore(forHome: homeURL) }
     private(set) var reviewItems: [ReviewItem] = []
     private(set) var folderOptions: [FolderOption] = []
     private(set) var activity: [ActivityEvent] = []
@@ -374,6 +377,13 @@ final class AppModel {
             if MLXEngine.unavailableReason(.vision, store: store) == nil {
                 planner.imageCards = VisionCardWriter(model: mlx) { await mlx.unload(.vision) }
             }
+            if MLXEngine.unavailableReason(.embedder, store: store) == nil {
+                // Read with the move log just reloaded, so each file's state is current.
+                let catalog = Catalog(entries: (try? catalogStore.entries()) ?? [], records: records,
+                                      embedder: ModelSpec.embedder.id)
+                planner.catalog = CatalogContext(catalog: catalog, records: records, embedder: mlx,
+                                                 embedderID: ModelSpec.embedder.id)
+            }
             engine = mlx
         }
         let fullPlanner = planner
@@ -390,6 +400,12 @@ final class AppModel {
             }
             deepResults = Dictionary(plan.actions.map { (FileIdentity($0), $0) }, uniquingKeysWith: { $1 })
             keepProfiles(plan.profiles)
+            do {
+                try catalogStore.append(plan.catalogEntries)
+            } catch {
+                log(.warning, "Couldn't save \(plan.catalogEntries.count) catalog entries: \(error.localizedDescription)")
+            }
+            refreshCatalogCounts()
             // Only the outermost unpacked folders show up in quick scans.
             let outermost = plan.unpacked.filter { $0.deletingLastPathComponent().standardizedFileURL == folder.standardizedFileURL }
             deepUnpacked = Dictionary(outermost.map { unpacked in
@@ -565,10 +581,16 @@ final class AppModel {
                 show(.warning, "\(damaged) line\(damaged == 1 ? "" : "s") of the move log couldn't be read and were skipped; the rest of the history is fine.")
             }
             reportedDamagedLines = damaged
+            refreshCatalogCounts()
         } catch {
             records = []
             show(.error, "Couldn't read the move log (\(display(journal.url))): \(error.localizedDescription)")
         }
+    }
+
+    func refreshCatalogCounts() {
+        let catalog = Catalog(entries: (try? catalogStore.entries()) ?? [], records: records, embedder: ModelSpec.embedder.id)
+        catalogCounts = (catalog.items.filter { $0.state == .filed }.count, catalog.items.filter { $0.state == .waiting }.count)
     }
 
     func refreshReviewFolder() {

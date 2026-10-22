@@ -172,6 +172,28 @@ model). An image it can't describe, or every image when it isn't downloaded, goe
 The card's kind decides the way: document words (receipt, bill, ticket, letter, chart, slide…) send
 the image to the folder decision; anything else is a picture.
 
+## The catalog (embeddings, so similar means similar in meaning)
+
+`catalog.jsonl` (next to the move log: `TestData/catalog.jsonl` in the sandbox, Application Support for
+your real home) keeps one line per file a model looked at: its content hash, its card, the card as one
+line, and that line's embedding from `mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ` (1,024 numbers stored as
+Float16, ~2 KB). It's append-only, like the move log; the newest line per file wins. Sensitive files,
+duplicates and folders are never in it.
+
+- **Where a file is now isn't stored:** it's worked out from the move log and the disk each time the
+  catalog is read. Moved by the app and still there → *filed*; undone → *undone*; never moved and still
+  in Downloads → *waiting*; not where it should be → *gone*. Only filed and waiting files are offered as similar.
+- **Similar files in one run:** each leftover's embedding is linked to its nearest neighbour when they're
+  at least 0.75 similar (fixed from the benchmark, not tuned on the sandbox); linked files form a group,
+  and the model still decides whether a group belongs together. Without the embedder, groups come from
+  shared main words as before.
+- **Nothing is described twice:** a file found in the catalog by its hash (waiting in Downloads, or
+  downloaded again) gets its old card back instead of a new model question.
+- **Back-fill:** each Organize Now cards and embeds up to 40 earlier files the app filed that aren't
+  catalogued yet (newest first; not review or safety cases), read where they are now. Entries made by
+  another embedder are embedded again from their stored line.
+- `organize catalog` lists it; `organize similar <file>` shows the 5 nearest files with their scores.
+
 ## The model (Qwen3 8B, on this Mac with MLX)
 
 `mlx-community/Qwen3-8B-4bit-DWQ`, downloaded once into
@@ -351,6 +373,7 @@ Sources/OrganizerCore/   facts, safety, rules, planning, applying (no UI)
   Rules/       rules engine and the rules above
   Classify/    FileClassifier protocol, MLXClassifier (questions to Qwen3), VisionCardWriter (image cards),
                FactSummary
+  Catalog/     catalog entries, state from the move log, nearest-neighbour search, grouping by meaning
   LocalModels/ LanguageModel protocol, thinking budget, lenient JSON + retries, model list and store
 Sources/OrganizerMLX/    the MLX engine: downloads, loads and runs the models (GPU)
   Planning/    Planner (duplicates, clashes, new folders), DestinationValidator
