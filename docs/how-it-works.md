@@ -23,13 +23,13 @@ When the model is unsure, the file simply waits in Downloads; nothing is ever lo
 | 3 | Apple's on-device model for leftovers: folders, new folders, names (text and images); replaced by Qwen3 (MLX B) | ✅ |
 | 4 | Menu-bar app + dashboard, Downloads watcher, approval UI, notifications, review reminder every 8 hours | ✅ |
 | 5 | Organize Now: the heavy work (text recognition + model) on demand from the menu bar | ✅ |
-| 6 | Evaluation on a labeled test set: rules only vs rules + model | |
+| 6 | Evaluation on a labeled test set (`organize eval`, MLX F) | ✅ |
 
 **Next (approved 2026-10-14):** a model-led app with few rules, in phases:
 1. Folders in Downloads: read inside, safety-checked, left alone while changing, unpacked when the model says so ✅ (0.7.0-dev)
 2. Folder profiles learned from your own folders (replacing the fixed folder list and personal prompt) ✅
 3. Grouping: similar files are placed together; a new folder only for a new file plus earlier files ✅ (decisions with the catalog: MLX E)
-4. Evaluation harness (the old Milestone 6), before any autonomy
+4. Evaluation harness (the old Milestone 6), before any autonomy ✅ (`organize eval`: MLX F)
 5. Only universal rules left (safety, installers, code projects, incomplete downloads); NSU/FSAE/course rules removed
 6. Earned autonomy: per-folder trust from your approvals; undo and corrections lower it
 
@@ -231,6 +231,24 @@ Swift then checks every answer:
 
 `organize model` shows whether the model can run; `--no-model` runs rules only.
 
+## Evaluation (`organize eval`)
+
+A regression check for any change to a prompt or a model, run by hand (`build/cli/organize eval`;
+results in `eval-results/<date>.json`, not committed). Everything happens in a new temporary folder.
+
+- **Test set:** the MLX benchmark's 27 text files (15 earlier, 12 new) and 12 scenarios, copied into
+  TestDataKit (`BenchmarkCorpus`), with one change: there's no Documents/Unsorted, so the earlier files
+  that sat there wait in Downloads. Plus C's 18 images.
+- **Parts:** cards (kind and issuer right?), decisions (each scenario's five earlier files, as the
+  benchmark gave them; ✓ / ~ / ✗ by the benchmark's rules), embeddings (recall@3 of the card lines,
+  top-1 scores), images (kind, key fact, name, document or picture), and with `--pipeline` the real
+  Planner: the filed earlier files moved into place by the Applier and catalogued, the rest waiting in
+  Downloads, then each new file planned on its own, scored by the same rules, with a check that the
+  files it belongs with were among the 5 nearest it was shown. Plus speed and peak memory.
+- **Compared with** the benchmark's numbers (⚠ when below) and the last saved run (what changed).
+- **Never tuned on:** a test fails if a prompt, or any code in OrganizerCore, names something from
+  the test sets (issuers, people, places).
+
 ## Safety, in code
 
 - Never deletes. Never overwrites: a different file with the same name gets the date added
@@ -379,8 +397,9 @@ Sources/OrganizerMLX/    the MLX engine: downloads, loads and runs the models (G
   Apply/       Applier, Undoer, SafeMove, MoveJournal (write-ahead log), FinderTags
   Config/      folder layout, record types, NSU course catalog, FolderCatalog (folders offered to the model),
                FolderProfile (what your folders hold, learned)
-Sources/TestDataKit/     generates realistic fake downloads + expected results, and the vision evaluation's image set
-Sources/organize/        the CLI (plan, apply, undo, log, model, facts)
+Sources/TestDataKit/     generates realistic fake downloads + expected results, the vision evaluation's image set, and
+                         the benchmark's corpus and scoring (BenchmarkCorpus, for organize eval)
+Sources/organize/        the CLI (plan, apply, undo, log, model, facts, catalog, similar, eval)
 Sources/DirectoryOrganizer/  the menu-bar app: AppModel (state, scans, moves), Views/ (dashboard pages)
   App/ (in OrganizerCore) FolderWatcher (FSEvents), AppSettings, AutoApplyPolicy, ReviewReminder
 docs/                    this file, the CLI cheatsheet

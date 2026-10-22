@@ -26,6 +26,11 @@ let usage = """
           Developer tool: compare the vision models on a built-in image set (docs/mlx-plan.md, C).
           --download      fetch missing models first (~3 GB each, once)
           --images-only   just build the image set (in a new temporary folder) to look at
+      organize eval [--cards] [--decisions] [--embeddings] [--images] [--pipeline | --all] [--scenarios S1,S2…] [--download]
+          Developer tool: the benchmark's test set and C's images through the app's models, scored
+          and compared with the benchmark and the last run (docs/mlx-plan.md, F). Without part
+          flags: cards, decisions, embeddings and images. --pipeline: each new file through the
+          real Planner with a catalog (slow; --all includes it). Results: eval-results/<date>.json
       organize undo --last | --batch <id> | --all | <file name>  [--home <folder>]
           Put files back exactly as they were (original folder, name and tags).
       organize log [--home <folder>]
@@ -283,6 +288,18 @@ case "image-eval":
         fail("image-eval takes only --download or --images-only")
     }
     await runImageEval(download: arguments.flags.contains("--download"), imagesOnly: arguments.flags.contains("--images-only"))
+
+case "eval":
+    let arguments = Arguments(args, valued: ["--scenarios"])
+    let named = Set(EvalPart.allCases.map { "--\($0.rawValue)" })
+    guard arguments.positional.isEmpty, arguments.flags.isSubset(of: named.union(["--all", "--download"])) else {
+        fail("eval takes --cards, --decisions, --embeddings, --images, --pipeline, --all, --scenarios S1,S2… and --download")
+    }
+    let only = arguments.values["--scenarios"].map { Set($0.uppercased().split(separator: ",").map(String.init)) }
+    var parts = EvalPart.allCases.filter { arguments.flags.contains("--\($0.rawValue)") }
+    if arguments.flags.contains("--all") { parts = EvalPart.allCases }
+    if parts.isEmpty { parts = EvalPart.standard }
+    await runEval(parts: parts, scenarios: only, download: arguments.flags.contains("--download"))
 
 case "facts":
     let arguments = Arguments(args)

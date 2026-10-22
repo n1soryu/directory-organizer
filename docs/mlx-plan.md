@@ -1,6 +1,6 @@
 # Plan: on-device models with MLX (language, vision, embeddings)
 
-Status: **Milestones A–E done** (2026-10-21/22); F is next. Plan written and approved 2026-10-21.
+Status: **Milestones A–F done** (2026-10-21/23); the old phases (4: universal rules only, 5: earned autonomy) are next. Plan written and approved 2026-10-21.
 Each milestone gets its own detailed plan, shown to the user before work begins, and ends with a commit.
 
 ## Why
@@ -229,12 +229,44 @@ near it in the catalog. That happens as part of the new file's decision, since t
 
 **Cost:** about 1 minute per leftover file (thinking on). The existing progress bar and Cancel cover it.
 
-### F. Evaluation harness (the old Phase 6)
+### F. Evaluation harness (the old Phase 6) — done 2026-10-23
 - `organize eval` runs the benchmark corpus (27 files, 12 scenarios; copied into TestDataKit) and the image set
   through the real pipeline, and prints the same scores as the benchmark: kind/issuer marks, ✓/~/✗ decisions,
   recall@3, speed and memory.
 - Scenarios are updated for decision 3: there is no `Documents/Unsorted`, and earlier unsorted files sit in Downloads (waiting).
 - It's a regression check for prompt or model changes. Never copy its examples into prompts.
+
+Outcome (2026-10-23): `organize eval [--cards] [--decisions] [--embeddings] [--images] [--pipeline | --all]
+[--scenarios S1,S2…]`, ~50 min for `--all`; results in `eval-results/<date>.json` (gitignored), compared with the
+benchmark's numbers (⚠ when worse) and with the last saved run. Decisions use the app's ids (E1…E5) and the benchmark's
+hand-written "about" lines, so they stay comparable; the pipeline uses the cards instead, as the app does. A test fails
+if a prompt, or any non-comment line in OrganizerCore, names something from the test sets.
+
+First full run (second attempt: the first was lost to an eval bug, below, and to macOS's Photos analysis slowing
+the GPU 30×):
+
+| | result | benchmark / C |
+|---|---|---|
+| cards: kind, issuer, valid JSON first try | 27/27, 25/27, 27/27 (4.9 s each, 5.2 GB) | 27, 25 |
+| decisions, fixed candidates: ✓ / ~ / ✗ | 9 / 1 / 2 (77 s each, 1 thinking cap, 5.8 GB) | 10 / 1 / 1 |
+| embeddings: recall@3, avg / lowest top-1, N3 / N10 | 10/10, 0.890 / 0.751, 0.778 / 0.737 | 10, 0.893 / 0.727, 0.758 / 0.703 |
+| images: kind, fact, name, right way | 10, 18, 18, 18 of 18 (3.5 s each, 4.5 GB) | 10, 18, 18, 18 |
+| pipeline (real Planner + catalog): ✓ / ~ / ✗ | 7 / 1 / 4; expected files among the 5 shown 9/9 (104 s per file, 6.2 GB) | – |
+
+- Decisions were identical in two runs. S3 ✗: the newsletter got a new folder with the electricity bill (grouped by
+  issuer, against rule 6). S4 ✗: `Bills/Restaurants` with the earlier receipt: sensible, but the benchmark's word list
+  has no "restaurant" (scorer left unchanged, so the baseline stays comparable).
+- Pipeline: retrieval is fine (the right files were always among the 5 shown); the misses are the model **pulling
+  unrelated earlier files into new folders**: S3 the bill into `Newsletters`, S4 the bill and rent receipt into
+  `Receipts` (with the right receipt), S10 the lease and rent receipt into `Animal Licences`; S7 ~ left the rent
+  receipt behind. These are grouped moves, so they always need approval, but they're the next thing to improve
+  (without tuning on these scenarios). S9 ✗ was no model at all: the NSU course rule matched the lecture's title
+  ("Introduction to Statistics" = ECO172), one more reason to remove the personal rules next (universal rules only). S1 ✓ (better than the fixed-candidate ~).
+- Embeddings: a cut-off still can't detect "no match" (N3 0.778 > lowest true match 0.751), as D found.
+- Eval bug found on the way: macOS lists the temporary folder as `/private/var/…` but `temporaryDirectory` says
+  `/var/…`; the catalog's paths didn't match, so the 9 waiting files were decided again in every plan (15–22 min per
+  scenario). The eval now uses `realpath` (Foundation's `resolvingSymlinksInPath` strips `/private` again). The app
+  isn't affected: its catalog paths come from the same folder listing.
 
 Then the old phases resume: 4 (remove NSU/FSAE/course rules; only universal rules remain) and 5 (earned autonomy).
 

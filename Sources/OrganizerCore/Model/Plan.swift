@@ -31,6 +31,27 @@ public struct ProposedAction: Codable, Sendable, Identifiable {
 
     public var isRenamed: Bool { finalName != originalName }
     public var destinationPath: String { destinationFolder + "/" + finalName }
+
+    public init(source: URL, originalName: String, sourceSize: Int64, sourceModified: Date?, destinationFolder: String,
+                finalName: String, tags: [Tag], confidence: Double, reason: String, decidedBy: DecisionSource,
+                alerts: [Alert], createsFolders: [String], facts: FileFacts? = nil, groupID: UUID? = nil,
+                isEarlierFile: Bool = false) {
+        self.source = source
+        self.originalName = originalName
+        self.sourceSize = sourceSize
+        self.sourceModified = sourceModified
+        self.destinationFolder = destinationFolder
+        self.finalName = finalName
+        self.tags = tags
+        self.confidence = confidence
+        self.reason = reason
+        self.decidedBy = decidedBy
+        self.alerts = alerts
+        self.createsFolders = createsFolders
+        self.facts = facts
+        self.groupID = groupID
+        self.isEarlierFile = isEarlierFile
+    }
 }
 
 /// Something in the folder that was deliberately left alone.

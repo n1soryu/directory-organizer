@@ -60,7 +60,8 @@ build/cli/organize model-check --download    # fetch the MLX models (~8 GB, once
 Needs full Xcode with the Metal toolchain: it compiles the GPU shaders of
 [MLX](https://github.com/ml-explore/mlx-swift), which runs the on-device models (Qwen3 8B, Qwen3-VL 4B for images and
 Qwen3 Embedding, downloaded once in Settings; see [docs/mlx-plan.md](docs/mlx-plan.md)). The app is built with `xcodebuild`;
-`swift run organize …` works too.
+`swift run organize …` works too. `build/cli/organize eval` checks the models' answers against a fixed test set
+after any change to a prompt or a model.
 
 ## Docs
 

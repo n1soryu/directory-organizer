@@ -19,3 +19,6 @@ build/
 
 # --- Coverage data from running debug builds ---
 *.profraw
+
+# --- organize eval results (local, per machine) ---
+eval-results/

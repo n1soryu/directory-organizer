@@ -63,6 +63,10 @@ Both debug runs use a throwaway settings file, never your real one.
 | `swift run organize similar TestData/Downloads/notes.txt` | The 5 catalogued files nearest in meaning, with scores (cards and embeds the file first if it isn't catalogued) |
 | `build/cli/organize image-eval [--download]` | Developer tool: compare the vision models (Qwen3-VL 4B, Gemma 3 4B) on a built-in image set: kind, key fact, name, document-or-picture, speed, memory |
 | `build/cli/organize image-eval --images-only` | Just build that image set in a new temporary folder, to look at it |
+| `build/cli/organize eval` | Developer tool, the regression check: the benchmark's 27 files and 12 scenarios, and the image set, through the app's models; scored by the benchmark's rules, compared with its numbers and with the last run (~25 min) |
+| `build/cli/organize eval --cards` (`--decisions`, `--embeddings`, `--images`) | Only those parts (cards are made whenever embeddings or the pipeline need them) |
+| `build/cli/organize eval --pipeline` (or `--all`) | Also each new file through the real Planner, with a catalog of the earlier files: what the app would actually propose (~25 more min) |
+| `build/cli/organize eval --decisions --scenarios S3,S4` | Only those scenarios (decisions, embeddings and pipeline) |
 | `swift run organize apply TestData/Downloads` | Show the plan, then ask: **[a]** all · **[o]** one by one · **[c]** cancel |
 | `swift run organize apply TestData/Downloads --yes` | Apply everything without asking (`--no-model` works here too) |
 | `swift run organize undo --last` | Put back the most recent batch exactly as it was |
