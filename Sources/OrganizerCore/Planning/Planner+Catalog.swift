@@ -126,26 +126,41 @@ extension Planner {
         return result
     }
 
-    /// Catalog entries for this run's files: leftovers, and pictures the vision model saw. Not
-    /// safety cases (duplicates found anywhere included: they're judged in the final actions),
-    /// not folders, and not files the catalog already has.
-    func runEntries(_ facts: [FileFacts], actions: [ProposedAction],
+    /// Catalog entries for this run's files: leftovers (with the model's wait verdict), and
+    /// pictures the vision model saw. Not safety cases (duplicates found anywhere included: they're
+    /// judged in the final actions), not folders. A file the catalog already has is written again
+    /// only when the verdict changed.
+    func runEntries(_ facts: [FileFacts], actions: [ProposedAction], waited: Set<URL>,
                     embedded: [URL: Embedded], hashes: inout HashCache, context: CatalogContext) async -> [CatalogEntry] {
         let finalSource = Dictionary(actions.map { ($0.source, $0.decidedBy) }, uniquingKeysWith: { $1 })
         var entries: [CatalogEntry] = []
         for item in facts where !item.isDirectory {
-            guard let source = finalSource[item.url] else { continue }
+            let didWait = waited.contains(item.url)
+            guard let source = didWait ? .classifier(classifier.name) : finalSource[item.url] else { continue }
             if case .safety = source { continue }
-            guard let hash = hashes.hash(item.url), !context.catalog.contains(key: hash) else { continue }
+            guard let hash = hashes.hash(item.url) else { continue }
+            let verdict: Bool? = embedded[item.url] == nil ? nil : didWait
+            if let known = context.catalog.latest[hash], known.embedder == context.embedderID, known.waited == verdict { continue }
             var found = embedded[item.url]
             if found == nil, let card = item.visionCard {
                 found = await embed(item, card: card, context: context)
             }
             guard let found else { continue }
-            entries.append(entry(found, sha256: hash, moveID: nil, path: item.url.path,
-                                 decidedBy: source.description, context: context))
+            var entry = entry(found, sha256: hash, moveID: nil, path: item.url.path,
+                              decidedBy: source.description, context: context)
+            entry.waited = verdict
+            entries.append(entry)
         }
         return entries
+    }
+
+    /// When the model last said "wait" for this file, if it's still waiting in Downloads: it isn't
+    /// asked again (a similar new file can still pull it in).
+    func waitedBefore(_ item: FileFacts, _ hashes: inout HashCache) -> Date? {
+        guard mode == .full, let catalog, !item.isDirectory, usesModel(item), let hash = hashes.hash(item.url),
+              let found = catalog.catalog.items.first(where: { $0.entry.key == hash }),
+              found.state == .waiting, found.entry.waited == true, found.path == item.url.path else { return nil }
+        return found.entry.time
     }
 
     /// The card's line (or the start of the text, without a card), embedded.

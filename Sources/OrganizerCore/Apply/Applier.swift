@@ -30,22 +30,39 @@ public struct Applier: Sendable {
         self.journal = journal
     }
 
-    /// Applies the actions as one batch (undone together by `undo --last`).
+    /// Applies the actions as one batch (undone together by `undo --last`). A group (a new file
+    /// and the earlier files moving with it) moves only if every member is still as planned:
+    /// otherwise a new folder could end up with one file in it.
     public func apply(_ actions: [ProposedAction], batchID: UUID = UUID()) -> [ApplyResult] {
         _ = try? journal.recover()
-        return actions.map { apply($0, batchID: batchID) }
+        var broken: [UUID: String] = [:]
+        for action in actions {
+            guard let group = action.groupID, broken[group] == nil, let problem = changed(action) else { continue }
+            broken[group] = "moves together with \(action.originalName), which \(problem)"
+        }
+        return actions.map { action in
+            if let group = action.groupID, let why = broken[group] {
+                return ApplyResult(action: action, outcome: .skipped(why))
+            }
+            return apply(action, batchID: batchID)
+        }
     }
 
-    private func apply(_ action: ProposedAction, batchID: UUID) -> ApplyResult {
-        let fm = FileManager.default
-        let source = action.source
+    /// Why the source isn't as it was when planned ("is gone", "changed"), or nil.
+    private func changed(_ action: ProposedAction) -> String? {
+        switch precheck(action) {
+        case .some(.skipped(let why)): why.hasSuffix("is no longer there") ? "is gone" : "changed after the plan was made"
+        default: nil
+        }
+    }
 
-        // 1. The file must be exactly as it was when planned. (Asks the disk directly:
-        //    URL.resourceValues can return values cached while planning.)
-        var fresh = source
+    /// 1. The file must be exactly as it was when planned. (Asks the disk directly:
+    ///    URL.resourceValues can return values cached while planning.)
+    private func precheck(_ action: ProposedAction) -> ApplyResult.Outcome? {
+        var fresh = action.source
         fresh.removeAllCachedResourceValues()
         guard let values = try? fresh.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey, .isDirectoryKey]) else {
-            return ApplyResult(action: action, outcome: .skipped(MoveError.sourceMissing(source.path).description))
+            return .skipped(MoveError.sourceMissing(action.source.path).description)
         }
         // A folder counts as changed if anything inside it changed (the same tree-wide size
         // and newest change the plan recorded), so a half-unzipped folder isn't moved.
@@ -53,7 +70,17 @@ public struct Applier: Sendable {
             ? FolderScan.fingerprint(fresh)
             : (Int64(values.fileSize ?? 0), values.contentModificationDate)
         if size != action.sourceSize || modified != action.sourceModified {
-            return ApplyResult(action: action, outcome: .skipped(MoveError.sourceChanged(action.originalName).description))
+            return .skipped(MoveError.sourceChanged(action.originalName).description)
+        }
+        return nil
+    }
+
+    private func apply(_ action: ProposedAction, batchID: UUID) -> ApplyResult {
+        let fm = FileManager.default
+        let source = action.source
+
+        if let outcome = precheck(action) {
+            return ApplyResult(action: action, outcome: outcome)
         }
 
         // 2. Check the destination again: the plan could be old, or edited.

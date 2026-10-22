@@ -18,6 +18,32 @@ public enum TestDataBuilder {
     /// Marks a folder as ours, so rebuilding may safely delete it.
     static let marker = ".file-organizer-testdata"
 
+    /// Round 2: a few later downloads, added to a sandbox that's already there (round 1 planned
+    /// and applied), so regrouping has earlier files to work with: a second electricity bill, a
+    /// second appliance manual and a second shopping list. Never replaces a file. For checking
+    /// the pipeline only: never use them, or anything about them, as prompt examples.
+    public static func addRound2(at root: URL) throws -> [String] {
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: root.appending(path: marker).path) else {
+            throw CocoaError(.fileNoSuchFile, userInfo: [
+                NSLocalizedDescriptionKey: "\(root.path) isn't a test data folder; run make-testdata first",
+            ])
+        }
+        let downloads = root.appending(path: "Downloads")
+        let names = ["desco_oct.pdf", "kettle_EK1700.pdf", "groceries.txt"]
+        for name in names where fm.fileExists(atPath: downloads.appending(path: name).path) {
+            throw CocoaError(.fileWriteFileExists, userInfo: [NSLocalizedDescriptionKey: "\(name) is already in Downloads"])
+        }
+        try Drawing.textPDF(pages: [
+            "Dhaka Electric Supply Company Limited (DESCO)\nElectricity Bill, October 2026\n\nAccount No: 12345678\nBilling period: 01 Oct 2026 to 31 Oct 2026\nUnits consumed: 198 kWh\nAmount payable: BDT 1,705\nDue date: 20 November 2026",
+        ], to: downloads.appending(path: "desco_oct.pdf"))
+        try Drawing.textPDF(pages: [
+            "EK1700 Electric Kettle\nInstruction Manual\n\nSafety instructions\nFilling the kettle\nBoiling water\nDescaling and cleaning",
+        ], title: "Electric Kettle Instruction Manual", to: downloads.appending(path: "kettle_EK1700.pdf"))
+        try "bread\nonions\ntea\nsoap\n".write(to: downloads.appending(path: "groceries.txt"), atomically: true, encoding: .utf8)
+        return names
+    }
+
     public static func build(at root: URL) throws -> [ExpectedOutcome] {
         let fm = FileManager.default
         if fm.fileExists(atPath: root.path) {

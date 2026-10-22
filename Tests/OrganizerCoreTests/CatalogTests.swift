@@ -139,15 +139,27 @@ struct CatalogStateTests {
     }
 }
 
-struct SimilarityGrouperTests {
-    @Test func nearestNeighboursAboveTheFloorGroup() {
-        let vectors: [[Float]] = [[1, 0, 0], [0, 1, 0], [0.95, 0.1, 0], [0.9, 0, 0.2], [0, 0, 1]]
-        #expect(SimilarityGrouper.groups(vectors) == [[0, 2, 3], [1], [4]])
-    }
+/// The catalog as one run sees it, growing as files are decided.
+struct NeighbourhoodTests {
+    @Test func catalogFilesWithTheirFoldersThenThisRunsDecisions() {
+        let home = URL(filePath: "/h")
+        let filed = record("/d/a.pdf", moved: "/h/Documents/Bills/a.pdf", sha: "a")
+        let entries = [catalogEntry("/d/a.pdf", sha: "a", line: "bill", vector: [1, 0], time: Date(timeIntervalSince1970: 0)),
+                       catalogEntry("/d/b.pdf", sha: "b", line: "recipe", vector: [0, 1])]
+        var area = Neighbourhood(catalog: Catalog(entries: entries, records: [filed], embedder: "e@1", exists: { _ in true }),
+                                 homeRoot: home)
+        #expect(area.items.map(\.folder) == ["Documents/Bills", nil])
 
-    @Test func nothingCloseEnoughStaysAlone() {
-        #expect(SimilarityGrouper.groups([[1, 0], [0.6, 0.8]]) == [[0], [1]])  // 0.6 < 0.75
-        #expect(SimilarityGrouper.groups([[1, 0], []]) == [[0], [1]])          // no vector: never grouped
+        area.add(key: "c", path: "/d/c.pdf", name: "c.pdf", about: "gas bill", vector: [0.9, 0.1], folder: "Documents/Gas")
+        let near = area.nearest(to: [1, 0], excluding: "x", path: "/d/new.pdf")
+        #expect(near.map(\.about) == ["bill", "gas bill", "recipe"])
+        #expect(near[1].proposed)
+        // Never the file itself.
+        #expect(!area.nearest(to: [1, 0], excluding: "a", path: "/d/new.pdf").contains { $0.about == "bill" })
+
+        area.claim("/d/b.pdf", into: "Documents/Recipes")
+        let claimed = area.items.first { $0.path == "/d/b.pdf" }
+        #expect(claimed?.folder == "Documents/Recipes" && claimed?.claimed == true && claimed?.proposed == true)
     }
 }
 
@@ -157,14 +169,15 @@ struct SimilarityGrouperTests {
     var downloads: URL { root.appending(path: "Downloads") }
     var home: URL { root.appending(path: "Home") }
 
-    /// Cards by file name; counts card questions; says the appliance group belongs together.
+    /// Cards by file name; counts card questions. A manual that sees another manual among its
+    /// earlier files makes a new folder for both; everything else waits.
     final class FakeModel: FileClassifier, @unchecked Sendable {
         let name = "fake"
         private let lock = NSLock()
         private var _carded: [String] = []
-        private var _groups: [[String]] = []
+        private var _asked: [(file: String, earlier: [EarlierCandidate])] = []
         var carded: [String] { lock.withLock { _carded } }
-        var groups: [[String]] { lock.withLock { _groups } }
+        var asked: [(file: String, earlier: [EarlierCandidate])] { lock.withLock { _asked } }
 
         static let cards: [String: FileCard] = [
             "router": FileCard(kind: "router user guide", subject: "router setup", suggestedName: "Router guide", summary: "How to set up a router."),
@@ -172,6 +185,7 @@ struct SimilarityGrouperTests {
             "pancakes": FileCard(kind: "recipe", subject: "pancake", suggestedName: "Pancakes", summary: "A pancake recipe."),
             "course": FileCard(kind: "lecture notes", subject: "economics", suggestedName: "Notes", summary: "Notes."),
         ]
+        static let manuals: Set<String> = ["router", "fryer"]
 
         func card(for facts: FileFacts) async throws -> FileCard {
             if let card = facts.knownCard { return card }
@@ -179,17 +193,14 @@ struct SimilarityGrouperTests {
             guard let card = Self.cards[facts.baseName] else { throw ClassifierError.unavailable("no card") }
             return card
         }
-        func describe(_ facts: FileFacts) async throws -> FileDescription {
-            let kind = try await card(for: facts).kind
-            return FileDescription(kind: kind, category: kind)
-        }
-        func placeGroup(_ request: GroupRequest) async throws -> GroupSuggestion {
-            lock.withLock { _groups.append(request.members.map(\.baseName).sorted()) }
-            return GroupSuggestion(belongTogether: true, suggestion: ClassifierSuggestion(
-                destination: "Documents/Manuals", isNewFolder: true, confidence: 0.9, reason: "appliance manuals"))
-        }
-        func suggest(_ request: ClassificationRequest) async throws -> ClassifierSuggestion {
-            ClassifierSuggestion(destination: OrganizerConfig().reviewFolder, confidence: 0.5, reason: "unsure")
+        func decide(_ request: DecisionRequest) async throws -> FolderDecision {
+            lock.withLock { _asked.append((request.facts.baseName, request.earlier)) }
+            if Self.manuals.contains(request.facts.baseName),
+               let other = request.earlier.first(where: { $0.about.contains("manual") || $0.about.contains("guide") }) {
+                return FolderDecision(reason: "both are appliance manuals", action: .newFolder, folder: "Documents/Manuals",
+                                      moveEarlier: [other.id])
+            }
+            return FolderDecision(reason: "nothing like it", action: .wait)
         }
         func suggestName(for facts: FileFacts) async throws -> NameSuggestion { throw ClassifierError.unavailable("") }
     }
@@ -212,7 +223,7 @@ struct SimilarityGrouperTests {
                        embedder: embedder, embedderID: "topic@1", catchUpLimit: limit)
     }
 
-    @Test func manualsGroupByMeaningAndLeftoversAreCatalogued() async throws {
+    @Test func aLaterFilePullsAWaitingOneIntoANewFolder() async throws {
         try setUp()
         defer { try? FileManager.default.removeItem(at: root) }
         let model = FakeModel()
@@ -221,15 +232,29 @@ struct SimilarityGrouperTests {
         planner.catalog = context(embedder: TopicEmbedder())
         let plan = try await planner.plan(folder: downloads)
 
-        // "router user guide" and "appliance manual" share no main word, but are close in meaning.
-        #expect(model.groups == [["fryer", "router"]])
+        // Decided one by one; the second manual sees the first among its earlier files (nearest
+        // first), waiting in Downloads, and makes a folder for both.
+        let manual = try #require(model.asked.last { FakeModel.manuals.contains($0.file) })
+        #expect(manual.earlier.first.map { FakeModel.manuals.contains(URL(filePath: $0.path).deletingPathExtension().lastPathComponent) } == true)
+        #expect(manual.earlier.first?.shownFolder == "Downloads (waiting)")
+        let moves = plan.actions.filter { $0.destinationFolder == "Documents/Manuals" }
+        #expect(Set(moves.map(\.originalName)) == ["router.txt", "fryer.txt"])
+        #expect(moves.filter(\.isEarlierFile).count == 1)
+        #expect(Set(moves.compactMap(\.groupID)).count == 1 && moves.allSatisfy { $0.groupID != nil })
+        #expect(moves.allSatisfy { $0.createsFolders == ["Documents/Manuals"] || $0.createsFolders.isEmpty })
+        // The recipe waits, in Downloads: no action, listed as waiting for a match.
+        #expect(plan.waiting.map(\.name) == ["pancakes.txt"])
+        #expect(plan.waiting.allSatisfy { $0.forMatch })
+        #expect(!plan.actions.contains { $0.originalName == "pancakes.txt" })
+
         let entries = plan.catalogEntries
         #expect(Set(entries.map { URL(filePath: $0.path).lastPathComponent }) == ["router.txt", "fryer.txt", "pancakes.txt"])
         #expect(entries.allSatisfy { $0.embedder == "topic@1" && $0.sha256 != nil && $0.cardSource == .text })
-        #expect(entries.first { $0.path.hasSuffix("router.txt") }?.line == FakeModel.cards["router"]!.line)
+        #expect(Dictionary(uniqueKeysWithValues: entries.map { (URL(filePath: $0.path).lastPathComponent, $0.waited) })
+                == ["router.txt": false, "fryer.txt": false, "pancakes.txt": true])
     }
 
-    @Test func aSecondRunReusesTheCards() async throws {
+    @Test func aWaitingFileIsNotAskedAgainButCardsAreReused() async throws {
         try setUp()
         defer { try? FileManager.default.removeItem(at: root) }
         let first = FakeModel()
@@ -244,7 +269,21 @@ struct SimilarityGrouperTests {
         planner.catalog = context(entries: entries, embedder: TopicEmbedder())
         let plan = try await planner.plan(folder: downloads)
         #expect(second.carded.isEmpty)
-        #expect(plan.catalogEntries.isEmpty)  // already catalogued
+        #expect(!second.asked.contains { $0.file == "pancakes" })
+        #expect(plan.waiting.first { $0.name == "pancakes.txt" }?.reason.hasPrefix("Waiting for a match since") == true)
+        #expect(plan.catalogEntries.isEmpty)  // nothing changed
+    }
+
+    @Test func withoutTheCatalogThereAreNoEarlierFiles() async throws {
+        try setUp()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = FakeModel()
+        var planner = Planner(homeRoot: home)
+        planner.classifier = model
+        let plan = try await planner.plan(folder: downloads)
+        #expect(plan.catalogEntries.isEmpty)
+        #expect(model.asked.allSatisfy { $0.earlier.isEmpty })
+        #expect(Set(plan.waiting.map(\.name)) == ["router.txt", "fryer.txt", "pancakes.txt"])
     }
 
     @Test func earlierFilesAreBackFilledUpToTheLimit() async throws {
@@ -296,17 +335,5 @@ struct SimilarityGrouperTests {
         #expect(renewed.count == 1)
         #expect(renewed[0].embedder == "topic@1")
         #expect(embedder.texts.contains("kind: energy bill"))
-    }
-
-    @Test func withoutTheCatalogNothingIsEmbedded() async throws {
-        try setUp()
-        defer { try? FileManager.default.removeItem(at: root) }
-        let model = FakeModel()
-        var planner = Planner(homeRoot: home)
-        planner.classifier = model
-        let plan = try await planner.plan(folder: downloads)
-        #expect(plan.catalogEntries.isEmpty)
-        // Grouped by shared words only: guide and manual don't match.
-        #expect(model.groups.isEmpty)
     }
 }

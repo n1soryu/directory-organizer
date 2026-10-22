@@ -58,6 +58,7 @@ Both debug runs use a throwaway settings file, never your real one.
 | `swift run organize model` | Which models are downloaded, and can the model run here? |
 | `build/cli/organize model-check` | Load each MLX model and run one short sample: valid JSON, tokens per second, peak memory (`swift run organize model-check` works too) |
 | `build/cli/organize model-check --download` | The same, after downloading any missing model (~8 GB, once) |
+| `swift run make-testdata --round2` | Add 3 later downloads (a bill, a manual, a shopping list) to the sandbox, to see earlier files regrouped after round 1 was applied |
 | `swift run organize catalog` | The catalog: every file a model carded, filed / waiting / undone / gone |
 | `swift run organize similar TestData/Downloads/notes.txt` | The 5 catalogued files nearest in meaning, with scores (cards and embeds the file first if it isn't catalogued) |
 | `build/cli/organize image-eval [--download]` | Developer tool: compare the vision models (Qwen3-VL 4B, Gemma 3 4B) on a built-in image set: kind, key fact, name, document-or-picture, speed, memory |

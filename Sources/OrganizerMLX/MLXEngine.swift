@@ -44,9 +44,15 @@ public actor MLXEngine: OrganizerCore.LanguageModel, OrganizerCore.TextEmbedder 
     /// and it keeps the vision model's memory and time in check.
     public static let imageSide = 1_024
 
+    /// MLX keeps freed GPU buffers for reuse, and by default without limit: over a long Organize Now
+    /// that cache grew to several GB on top of the model (a 12 GB peak on a 16 GB Mac). Capped, it
+    /// costs nothing measurable: buffers are still reused, just not hoarded.
+    public static let cacheLimit = 512 * 1024 * 1024
+
     public init(store: ModelStore = ModelStore(), vision: ModelSpec = .vision) {
         self.store = store
         self.vision = vision
+        if Self.shadersAvailable { Memory.cacheLimit = Self.cacheLimit }  // touching MLX without shaders would abort
     }
 
     /// Whether MLX will find its compiled shaders. Without them its first GPU call aborts the

@@ -1,6 +1,6 @@
 # Plan: on-device models with MLX (language, vision, embeddings)
 
-Status: **Milestones A–D done** (2026-10-21/22); E is next. Plan written and approved 2026-10-21.
+Status: **Milestones A–E done** (2026-10-21/22); F is next. Plan written and approved 2026-10-21.
 Each milestone gets its own detailed plan, shown to the user before work begins, and ends with a commit.
 
 ## Why
@@ -187,7 +187,23 @@ files, so no database or index is needed. Before ranking, filter to files that s
 **`Grouper`:** the `NLEmbedding` label distance goes away. "Similar" now means near in the catalog,
 and the model makes the final call.
 
-### E. Decisions and regrouping
+### E. Decisions and regrouping — done 2026-10-22
+Outcome: one decision per leftover (join / new_folder / wait) with the 5 nearest catalog files and no cut-off;
+the interim `suggest`/`placeGroup` prompts, D's similarity grouping and `Grouper` are gone. The user confirmed that an
+unsure model means the file waits in Downloads (review stays for rules, safety and runs without models). Within a run,
+each decided file joins an in-run copy of the catalog, so groups form through the same single decision. Groups are
+approved/rejected/undone together, never auto-applied, and skipped whole if any member changed (Applier).
+Sandbox, two rounds (`make-testdata`, apply; `make-testdata --round2`, apply):
+- Round 1 (11.7 min, peak footprint 6.3 GB): bills → new Documents/Bills pulling the waiting electricity bill; the airfryer
+  manual → new Documents/Manuals pulling the router guide (D's 0.72 pair, now grouped by the model); essay → Essays; film
+  folder → Films; shopping list and lab note wait in Downloads. Debatable: photos.zip (text files) → Downloaded Images.
+- Round 2: October bill joins Bills, kettle manual joins Manuals, the new shopping list makes Documents/Shopping Lists
+  pulling the waiting one. 3/3. Undo of the batch put the group back (and removed the emptied folder).
+- Found and fixed: MLX's buffer cache is unlimited by default and grew to a 12.1 GB peak footprint in round 2; capped at
+  512 MB (`MLXEngine.cacheLimit`), the same run peaked at 6.9 GB (5.6–6.2 GB in use by MLX). Wall time of that rerun was
+  inflated by a 34-minute idle sleep of the Mac; the app doesn't yet hold a no-idle-sleep assertion during Organize Now.
+
+Plan as approved:
 **Prompt:** the benchmark's Task 2 (reason first), plus your folder profiles (Phase 2) and corrections (undone moves).
 Candidates are the top 5 from the catalog. A waiting candidate is shown as `folder: Downloads (waiting)`.
 

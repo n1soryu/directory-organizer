@@ -7,13 +7,15 @@ import TestDataKit
 /// tested without the real model.
 struct FakeClassifier: FileClassifier {
     let name = "fake"
-    var suggestion: ClassifierSuggestion? = nil
+    var answer: FolderDecision? = nil
     var title: NameSuggestion? = nil
     var unavailable = false
+    var invalid = false
 
-    func suggest(_ request: ClassificationRequest) async throws -> ClassifierSuggestion {
+    func decide(_ request: DecisionRequest) async throws -> FolderDecision {
         if unavailable { throw ClassifierError.unavailable("switched off for the test") }
-        return try #require(suggestion)
+        if invalid { throw ClassifierError.invalidAnswer("nonsense three times") }
+        return try #require(answer)
     }
 
     func suggestName(for facts: FileFacts) async throws -> NameSuggestion {
@@ -37,86 +39,139 @@ struct FakeClassifier: FileClassifier {
         return planner
     }
 
-    func suggest(_ destination: String, newFolder: Bool = false, confidence: Double = 0.9, newName: String? = nil) -> FakeClassifier {
-        FakeClassifier(suggestion: ClassifierSuggestion(destination: destination, isNewFolder: newFolder, newBaseName: newName,
-                                                        confidence: confidence, reason: "trust me"))
+    func answer(_ action: FolderDecision.Action, _ folder: String?, earlier: [String] = [], name: String? = nil) -> FakeClassifier {
+        FakeClassifier(answer: FolderDecision(reason: "trust me", action: action, folder: folder, moveEarlier: earlier,
+                                              newFileName: name))
     }
 
-    @Test func acceptsAnOfferedFolderAndTakesTagsFromIt() async throws {
+    /// Decides with one similar earlier file (E1), waiting in Downloads unless `filedIn` says where it is.
+    func decideWithEarlier(_ planner: Planner, _ file: FileFacts, filedIn folder: String? = nil) async -> (verdict: Verdict, pulled: [PulledFile]) {
+        let path = folder.map { home.appending(path: "\($0)/old.pdf").path } ?? "/tmp/Downloads/old.pdf"
+        var records: [MoveRecord] = []
+        if folder != nil { records.append(record("/tmp/Downloads/old.pdf", moved: path, sha: "old")) }
+        let catalog = Catalog(entries: [catalogEntry("/tmp/Downloads/old.pdf", sha: "old", line: "kind: thing", vector: [1, 0],
+                                                     time: Date(timeIntervalSince1970: 0))],
+                              records: records, embedder: "e@1", exists: { _ in true })
+        var newFolders: [String: String] = [:]
+        return await planner.decide(file, folders: FolderCatalog.options(homeRoot: home, config: planner.config),
+                                    neighbourhood: Neighbourhood(catalog: catalog, homeRoot: home), vector: [1, 0], key: "new",
+                                    newFolders: &newFolders)
+    }
+
+    @Test func joinsAnOfferedFolderAndTakesTagsFromIt() async throws {
         defer { try? FileManager.default.removeItem(at: home) }
-        let planner = try planner(suggest("Documents/Essays"))
+        let planner = try planner(answer(.join, "Documents/Essays"))
         // The folder's tag is the one its files carry.
         for name in ["a.docx", "b.docx"] {
             let file = home.appending(path: "Documents/Essays/\(name)")
             try Data("x".utf8).write(to: file)
             try FinderTags.writeRaw([FinderTags.encode(.personal)], to: file)
         }
-        let decision = await planner.decide(facts(name: "essay.docx", text: "My essay"))
+        let decision = try #require(await planner.decide(facts(name: "essay.docx", text: "My essay")).decision)
         #expect(decision.destination == "Documents/Essays")
         #expect(decision.tags == [.personal])
+        #expect(decision.source == .classifier("fake"))
     }
 
-    @Test(arguments: ["Library/LaunchAgents", "Documents/Made Up", "/etc", "Documents/../Library"])
-    func rejectsFoldersThatWerentOffered(_ destination: String) async throws {
+    @Test(arguments: ["Library/LaunchAgents", "Documents/Made Up", "/etc", "Documents/../Library", "Downloads"])
+    func foldersThatWerentOfferedMeanWait(_ folder: String) async throws {
         defer { try? FileManager.default.removeItem(at: home) }
-        let planner = try planner(suggest(destination))
-        let decision = await planner.decide(facts(name: "notes.txt", text: "eggs, milk"))
-        #expect(decision.destination == planner.config.reviewFolder)
-        #expect(decision.alerts.contains { $0.kind == .rejected })
+        let planner = try planner(answer(.join, folder))
+        let verdict = await planner.decide(facts(name: "notes.txt", text: "eggs, milk"))
+        #expect(verdict.waitReason?.contains("rejected") == true, "\(folder)")
     }
 
-    @Test func lowConfidenceGoesToReview() async throws {
+    @Test func waitStaysInDownloads() async throws {
         defer { try? FileManager.default.removeItem(at: home) }
-        let planner = try planner(suggest("Documents/Essays", confidence: 0.4))
-        #expect(await planner.decide(facts(name: "x.docx", text: "hmm")).destination == planner.config.reviewFolder)
+        let planner = try planner(answer(.wait, nil))
+        #expect(await planner.decide(facts(name: "x.docx", text: "hmm")).waitReason == "Nothing like it yet: trust me")
     }
 
     @Test func universityNeedsNSUEvidence() async throws {
         defer { try? FileManager.default.removeItem(at: home) }
-        let planner = try planner(suggest("Documents/University"))
+        let planner = try planner(answer(.join, "Documents/University"))
         let manual = await planner.decide(facts(name: "router guide.pdf", text: "Archer AX55 user guide"))
-        #expect(manual.destination == planner.config.reviewFolder)
-        #expect(manual.reason.contains("no sign it's an NSU file"))
+        #expect(manual.waitReason?.contains("no sign it's an NSU file") == true)
 
         var nsu = facts(name: "notice.pdf", text: "Exam schedule")
         nsu.whereFroms = ["https://www.northsouth.edu/notice.pdf"]
-        #expect(await planner.decide(nsu).destination == "Documents/University")
+        #expect(await planner.decide(nsu).decision?.destination == "Documents/University")
     }
 
-    @Test func newFolderUnderTheRightParent() async throws {
+    @Test func aNewFolderTakesAnEarlierFileAlong() async throws {
         defer { try? FileManager.default.removeItem(at: home) }
-        let planner = try planner(suggest("Documents/Bills", newFolder: true))
-        #expect(await planner.decide(facts(name: "bill.pdf", text: "Electricity bill")).destination == "Documents/Bills")
+        let planner = try planner(answer(.newFolder, "Documents/Bills", earlier: ["E1"]))
+        let (verdict, pulled) = await decideWithEarlier(planner, facts(name: "bill.pdf", text: "Electricity bill"))
+        #expect(verdict.decision?.destination == "Documents/Bills")
+        #expect(verdict.decision?.confidence == 0.8)
+        #expect(pulled.map(\.path) == ["/tmp/Downloads/old.pdf"])
+        #expect(pulled.first?.waiting == true)
+    }
 
+    @Test func aNewFolderNeedsAnEarlierFile() async throws {
+        defer { try? FileManager.default.removeItem(at: home) }
+        // No earlier file listed: invalid, so it waits.
+        let none = try planner(answer(.newFolder, "Documents/Bills"))
+        #expect(await decideWithEarlier(none, facts(name: "bill.pdf", text: "Electricity bill")).verdict.waitReason != nil)
+        // And with no earlier files at all, a new folder can't happen.
+        let alone = try planner(answer(.newFolder, "Documents/Bills", earlier: ["E1"]))
+        #expect(await alone.decide(facts(name: "bill.pdf", text: "Electricity bill")).waitReason != nil)
+    }
+
+    @Test func newFoldersOnlyUnderTheRightParent() async throws {
+        defer { try? FileManager.default.removeItem(at: home) }
         // Audio can only get a new folder under Music, and nothing may go 3 levels deep.
-        let audio = try self.planner(suggest("Documents/Podcasts", newFolder: true))
-        #expect(await audio.decide(facts(name: "episode.mp3", text: nil)).destination == planner.config.reviewFolder)
-        let music = try self.planner(suggest("Music/Podcasts", newFolder: true))
-        #expect(await music.decide(facts(name: "episode.mp3", text: nil)).destination == "Music/Podcasts")
-        let deep = try self.planner(suggest("Documents/A/B/C", newFolder: true))
-        #expect(await deep.decide(facts(name: "a.pdf", text: "x")).destination == planner.config.reviewFolder)
+        let audio = try planner(answer(.newFolder, "Documents/Podcasts", earlier: ["E1"]))
+        #expect(await decideWithEarlier(audio, facts(name: "episode.mp3", text: nil)).verdict.waitReason != nil)
+        let music = try planner(answer(.newFolder, "Music/Podcasts", earlier: ["E1"]))
+        #expect(await decideWithEarlier(music, facts(name: "episode.mp3", text: nil)).verdict.decision?.destination == "Music/Podcasts")
+        let deep = try planner(answer(.newFolder, "Documents/A/B/C", earlier: ["E1"]))
+        #expect(await decideWithEarlier(deep, facts(name: "a.pdf", text: "x")).verdict.waitReason != nil)
     }
 
     @Test(arguments: ["Documents/.hidden", "Documents/Library", "Documents/a:b", "Documents/123"])
-    func rejectsBadNewFolderNames(_ destination: String) async throws {
+    func badNewFolderNamesMeanWait(_ folder: String) async throws {
         defer { try? FileManager.default.removeItem(at: home) }
-        let planner = try planner(suggest(destination, newFolder: true))
-        #expect(await planner.decide(facts(name: "a.pdf", text: "x")).destination == planner.config.reviewFolder)
+        let planner = try planner(answer(.newFolder, folder, earlier: ["E1"]))
+        #expect(await decideWithEarlier(planner, facts(name: "a.pdf", text: "x")).verdict.waitReason != nil)
     }
 
     @Test func reusesAFolderWithNearlyTheSameName() async throws {
         defer { try? FileManager.default.removeItem(at: home) }
         // "Manual" is close enough to the existing "Manuals".
-        let planner = try planner(suggest("Documents/manual", newFolder: true))
-        #expect(await planner.decide(facts(name: "guide.pdf", text: "user guide")).destination == "Documents/Manuals")
+        let planner = try planner(answer(.newFolder, "Documents/manual", earlier: ["E1"]))
+        let (verdict, pulled) = await decideWithEarlier(planner, facts(name: "guide.pdf", text: "user guide"))
+        #expect(verdict.decision?.destination == "Documents/Manuals")
+        #expect(pulled.count == 1)
+    }
+
+    @Test func earlierFilesAlreadyThereAreLeftOut() async throws {
+        defer { try? FileManager.default.removeItem(at: home) }
+        let planner = try planner(answer(.join, "Documents/Essays", earlier: ["E1"]))
+        let (verdict, pulled) = await decideWithEarlier(planner, facts(name: "essay.docx", text: "An essay"), filedIn: "Documents/Essays")
+        #expect(verdict.decision?.destination == "Documents/Essays")
+        #expect(pulled.isEmpty)
     }
 
     @Test func unavailableModelMeansReview() async throws {
         defer { try? FileManager.default.removeItem(at: home) }
         let planner = try planner(FakeClassifier(unavailable: true))
-        let decision = await planner.decide(facts(name: "notes.txt", text: "eggs"))
+        let decision = try #require(await planner.decide(facts(name: "notes.txt", text: "eggs")).decision)
         #expect(decision.destination == planner.config.reviewFolder)
         #expect(decision.reason.contains("switched off for the test"))
+    }
+
+    @Test func noUsableAnswerMeansWait() async throws {
+        defer { try? FileManager.default.removeItem(at: home) }
+        let planner = try planner(FakeClassifier(invalid: true))
+        #expect(await planner.decide(facts(name: "notes.txt", text: "eggs")).waitReason?.contains("nonsense three times") == true)
+    }
+
+    @Test func theModelsNameIsUsedOnlyForUnclearNames() async throws {
+        defer { try? FileManager.default.removeItem(at: home) }
+        let planner = try planner(answer(.join, "Documents/Essays", name: "Climate essay draft"))
+        #expect(await planner.decide(facts(name: "document (3).docx", text: "An essay")).decision?.newBaseName == "Climate essay draft")
+        #expect(await planner.decide(facts(name: "My essay.docx", text: "An essay")).decision?.newBaseName == nil)
     }
 
     @Test func namesUnclearImagesWithTheDate() async throws {
@@ -125,8 +180,8 @@ struct FakeClassifier: FileClassifier {
         classifier.title = NameSuggestion(title: "Router wireless settings page.png", confidence: 0.9)
         var image = facts(name: "IMG_4821.png", text: nil)
         image.image = ImageInfo(dateTaken: Calendar.current.date(from: DateComponents(year: 2026, month: 10, day: 12)))
-        let decision = await try planner(classifier).decide(image)
-        #expect(decision.newBaseName == "2026-10-12 Router wireless settings page")
+        let decision = try await planner(classifier).decide(image).decision
+        #expect(decision?.newBaseName == "2026-10-12 Router wireless settings page")
     }
 
     @Test func ignoresUselessOrUnsureNames() async throws {
@@ -135,8 +190,8 @@ struct FakeClassifier: FileClassifier {
                       NameSuggestion(title: "   ", confidence: 0.9)] {
             var classifier = FakeClassifier()
             classifier.title = title
-            let decision = await try planner(classifier).decide(facts(name: "IMG_4821.png", text: nil))
-            #expect(decision.newBaseName == nil, "\(title)")
+            let decision = try await planner(classifier).decide(facts(name: "IMG_4821.png", text: nil)).decision
+            #expect(decision?.newBaseName == nil, "\(title)")
         }
     }
 
@@ -145,8 +200,8 @@ struct FakeClassifier: FileClassifier {
         var classifier = FakeClassifier()
         classifier.title = NameSuggestion(title: "Holiday photo", confidence: 0.9)
         let phrase = BIP39.orderedWords.prefix(12).joined(separator: " ")
-        let decision = await try planner(classifier).decide(facts(name: "IMG_9.jpg", text: phrase))
-        #expect(decision.newBaseName?.hasSuffix("Recovery Phrase") == true)
+        let decision = try await planner(classifier).decide(facts(name: "IMG_9.jpg", text: phrase)).decision
+        #expect(decision?.newBaseName?.hasSuffix("Recovery Phrase") == true)
     }
 }
 

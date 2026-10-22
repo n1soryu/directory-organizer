@@ -23,6 +23,11 @@ public struct ProposedAction: Codable, Sendable, Identifiable {
     public var createsFolders: [String]
     /// Everything read from the file, for showing in the app.
     public var facts: FileFacts?
+    /// Moves that only make sense together (a new file and the earlier files the model put with
+    /// it) share a group: approved, rejected and undone as one, never auto-applied.
+    public var groupID: UUID?
+    /// An earlier file (already filed, or waiting in Downloads) that moves with a new one.
+    public var isEarlierFile = false
 
     public var isRenamed: Bool { finalName != originalName }
     public var destinationPath: String { destinationFolder + "/" + finalName }
@@ -49,6 +54,9 @@ public struct WaitingItem: Codable, Sendable, Identifiable {
     public var name: String
     public var identity: FileIdentity
     public var reason: String
+    /// Organize Now looked at it and nothing belongs with it yet: it stays in Downloads until a
+    /// similar file arrives (otherwise it's waiting for Organize Now).
+    public var forMatch = false
 }
 
 public struct Plan: Codable, Sendable {

@@ -39,7 +39,7 @@ public struct FileCard: Codable, Sendable, Equatable {
 
 /// The organizer's questions, asked of a local language model (Qwen3 8B through MLX in the app;
 /// a scripted fake in tests). Answers are JSON, read leniently and asked again up to twice when
-/// invalid; a question still unanswered then throws, and the planner sends the file to review.
+/// invalid; a question still unanswered then throws, and the file waits in Downloads.
 ///
 /// Thinking is off for describing (cards, folder purposes) and on for decisions (which folder,
 /// unpack or not): the benchmark showed decisions need it. In JSON that chooses, `reason` comes
@@ -58,7 +58,6 @@ public actor MLXClassifier: FileClassifier {
         self.unavailable = unavailable
     }
 
-    static let noneFits = "none of these"
     static let confidenceLevels: [String: Double] = ["high": 0.9, "medium": 0.75, "low": 0.4]
 
     // MARK: - Cards
@@ -101,12 +100,6 @@ public actor MLXClassifier: FileClassifier {
         !(facts.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    public func describe(_ facts: FileFacts) async throws -> FileDescription {
-        let kind = try await card(for: facts).kind.trimmingCharacters(in: .whitespacesAndNewlines)
-        // Grouping goes by the kind's main word ("electricity bill", "gas bill" → bill).
-        return FileDescription(kind: kind, category: kind)
-    }
-
     public func suggestName(for facts: FileFacts) async throws -> NameSuggestion {
         let card = try await card(for: facts)
         // A name from the file's own text, or from what the vision model saw, is trustworthy;
@@ -115,138 +108,65 @@ public actor MLXClassifier: FileClassifier {
         return NameSuggestion(title: card.suggestedName, confidence: seen ? 0.9 : 0.5)
     }
 
-    // MARK: - Where does this file go? (interim, until the catalog decisions of Milestone E)
+    // MARK: - Where does this file go? (the benchmark's Task 2, with the catalog's neighbours)
 
-    struct Placement: Decodable, Sendable {
-        var reason: String
-        var kind: String
-        var folder: String
-        var newFolder: String?
-        var newName: String?
-        var confidence: String
-
-        enum CodingKeys: String, CodingKey {
-            case reason, kind, folder, confidence
-            case newFolder = "new_folder"
-            case newName = "new_name"
-        }
+    /// The benchmark's decision prompt (11/12 with thinking on), with two changes: rule 3 names
+    /// the parents a new folder may go under, and rule 8 explains files waiting in Downloads
+    /// (there's no Documents/Unsorted). Folder purposes and your corrections come in the message.
+    static func decisionSystem(newFolderParents: [String]) -> String {
+        let parents = newFolderParents.map { "\"\($0)/\"" }.joined(separator: " or ")
+        return """
+            You help file documents on a Mac. A new file has arrived. You are shown the new file, up to five earlier files that may be related (with the folder each one is in now), and the folders that already exist. Decide where the new file should go.
+            Answer with one JSON object only, no other text, with these fields in this order:
+            {"reason": string, "action": "join" or "new_folder" or "wait", "folder": string or null, "move_earlier": [string], "new_file_name": string}
+            Rules:
+            1. Nothing is ever deleted. You only choose folders and names.
+            2. "join": put the new file in an existing folder. "folder" must be copied exactly from the list of existing folders.
+            3. "new_folder": create a folder for the new file together with earlier files that are clearly the same kind of thing and that a person would want kept together. "folder" is the new folder's full path; it must start with \(parents) and must not already exist. It may be inside an existing folder. "move_earlier" must list at least one earlier file id.
+            4. "move_earlier": ids of earlier files that should move into the chosen folder. Use only ids from the list. Leave out files that are already in that folder. It may be [] for "join".
+            5. "wait": nothing belongs with this file yet. "folder" is null and "move_earlier" is [].
+            6. Files belong together when they are the same kind of document for the same purpose, not just because they share a word or come from the same company.
+            7. Prefer an existing folder when it fits.
+            8. An earlier file shown as "Downloads (waiting)" has not been filed yet; it can be moved like any other earlier file. Never choose Downloads as "folder".
+            9. Write "reason" first, in one or two sentences.
+            10. "new_file_name": a clear file name for the new file, without extension.
+            """
     }
 
-    static func instructions(folders: [FolderOption], review: String, newFolderParents: [String],
-                             corrections: [String] = [], group: Bool = false) -> String {
-        let list = folders.map { folder in
+    static func decisionMessage(_ request: DecisionRequest, card: FileCard?) -> String {
+        let folders = request.folders.map { folder in
             var line = "- \(folder.path)"
             if let purpose = folder.purpose { line += ": \(purpose)" }
-            let examples = folder.examples.prefix(3).map { String($0.prefix(40)) }
-            if !examples.isEmpty { line += " (holds e.g. \(examples.joined(separator: "; ")))" }
             return line
         }.joined(separator: "\n")
-        let what = group ? "these files" : "this file"
+        let earlier = request.earlier.isEmpty ? "(none)" : request.earlier.map {
+            "- id: \($0.id) | folder: \($0.shownFolder) | name: \($0.name) | about: \($0.about)"
+        }.joined(separator: "\n")
         var text = """
-            You sort downloaded files into folders on a Mac. You only suggest; code checks your answer \
-            and the owner can undo it.
+            Existing folders:
+            \(folders)
 
-            Folders, with what they're for and files already in them:
-            \(list)
+            Earlier files:
+            \(earlier)
 
-            Answer with one JSON object only, no other text, with these fields in this order:
-            {"reason": string, "kind": string, "folder": string, "new_folder": string or null, \
-            \(group ? "" : "\"new_name\": string or null, ")"confidence": "high" or "medium" or "low"}
-            Rules:
-            - reason: first, in one or two sentences: which folder's purpose matches \(what) and why, or why none does.
-            - kind: what \(what) \(group ? "are" : "is"), in 2 to 5 words.
-            - folder: copied exactly from the list above, or "\(noneFits)".
-            - A folder fits only if its purpose matches what \(what) \(group ? "are" : "is"). Compare with the files already in it.
-            - Don't choose a folder because a word matches: a recipe is not a work document, a phone manual is not school material.
-            - If no folder's purpose matches, folder is "\(noneFits)" and new_folder is a new folder's path: \
-            one of \(newFolderParents.map { "\"\($0)/\"" }.joined(separator: ", ")) followed by a general category name \
-            of 1 to 3 words, plural, so similar files can go there too. Never use a file's own name, a brand or a date.
-            - Otherwise new_folder is null.
-            - If you can't tell what \(what) \(group ? "are" : "is"), choose \(review) with low confidence.
+            New file name: \(request.facts.name)
+
             """
-        if !group {
-            text += "\n- new_name: a clear name for the file, without extension, only when its current name is unclear; otherwise null."
-        }
-        if !corrections.isEmpty {
+        if let card { text += "About the new file: \(card.line)\n" }
+        text += "New file:\n<<<\n\(FactSummary.describe(request.facts, textLimit: Self.textLimit))\n>>>"
+        if !request.corrections.isEmpty {
             text += "\n\nThe owner corrected these earlier choices; don't repeat them:\n"
-                + corrections.map { "- \($0)" }.joined(separator: "\n")
+                + request.corrections.map { "- \($0)" }.joined(separator: "\n")
         }
         return text
     }
 
-    /// What's wrong with a placement, worded for the model; nil if it can be used.
-    static func problem(with answer: Placement, folders: [FolderOption], newFolderParents: [String]) -> String? {
-        if confidenceLevels[answer.confidence] == nil { return "\"confidence\" must be \"high\", \"medium\" or \"low\"" }
-        if answer.folder == noneFits {
-            guard let path = answer.newFolder?.trimmingCharacters(in: .whitespaces), !path.isEmpty else {
-                return "\"folder\" is \"\(noneFits)\", so \"new_folder\" must name the new folder"
-            }
-            guard let parent = newFolderParents.first(where: { path.hasPrefix($0 + "/") }) else {
-                return "\"new_folder\" must start with one of: \(newFolderParents.map { $0 + "/" }.joined(separator: ", "))"
-            }
-            let name = newFolderName(String(path.dropFirst(parent.count + 1)))
-            if name.isEmpty || name.contains("/") { return "\"new_folder\" must be the parent folder and one new folder name" }
-            return nil
-        }
-        if !folders.contains(where: { $0.path == answer.folder }) {
-            return "\"folder\" must be copied exactly from the list, or be \"\(noneFits)\""
-        }
-        return nil
-    }
-
-    static func newFolderName(_ raw: String) -> String {
-        raw.trimmingCharacters(in: CharacterSet(charactersIn: " /\"'."))
-    }
-
-    static func suggestion(from answer: Placement, newFolderParents: [String], newName: String?) -> ClassifierSuggestion {
-        let kind = answer.kind.trimmingCharacters(in: .whitespaces)
-        let label = kind.isEmpty ? "" : kind.prefix(1).uppercased() + kind.dropFirst() + ": "
-        let confidence = confidenceLevels[answer.confidence] ?? 0.4
-        if answer.folder == noneFits, let path = answer.newFolder?.trimmingCharacters(in: .whitespaces),
-           let parent = newFolderParents.first(where: { path.hasPrefix($0 + "/") }) {
-            let folder = newFolderName(String(path.dropFirst(parent.count + 1)))
-            return ClassifierSuggestion(destination: parent + "/" + folder, isNewFolder: true, newBaseName: newName,
-                                        confidence: confidence,
-                                        reason: "\(label)no existing folder fits, new folder \"\(folder)\". \(answer.reason)")
-        }
-        return ClassifierSuggestion(destination: answer.folder, newBaseName: newName, confidence: confidence,
-                                    reason: label + answer.reason)
-    }
-
-    public func suggest(_ request: ClassificationRequest) async throws -> ClassifierSuggestion {
-        var user = FactSummary.describe(request.facts, textLimit: Self.textLimit)
-        if let card = cards[request.facts.url] { user = "About this file: \(card.line)\n\n" + user }
-        let folders = request.folders, parents = request.newFolderParents
-        let answer = try await ask(Placement.self, thinking: true, [
-            .system(Self.instructions(folders: folders, review: request.reviewFolder, newFolderParents: parents,
-                                      corrections: request.corrections)),
-            .user(user),
-        ]) { Self.problem(with: $0, folders: folders, newFolderParents: parents) }
-        let newName = answer.newName.flatMap { $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0 }
-        return Self.suggestion(from: answer, newFolderParents: parents, newName: newName)
-    }
-
-    public func placeGroup(_ request: GroupRequest) async throws -> GroupSuggestion {
-        let shown = request.members.prefix(8)
-        // The text budget is shared by the files shown.
-        let each = max(300, min(1_500, Self.textLimit / max(shown.count, 1)))
-        let list = shown.enumerated().map { index, member in
-            var text = "File \(index + 1):\n"
-            if let card = cards[member.url] { text += "About this file: \(card.line)\n" }
-            return text + FactSummary.describe(member, textLimit: each)
-        }
-        let more = request.members.count > shown.count ? "\n\n(and \(request.members.count - shown.count) more like these)" : ""
-        let user = "These \(request.members.count) downloaded files look like the same kind of thing (\(request.category)). "
-            + "Where should they all go?\n\n" + list.joined(separator: "\n\n") + more
-        let folders = request.folders, parents = request.newFolderParents
-        let answer = try await ask(Placement.self, thinking: true, [
-            .system(Self.instructions(folders: folders, review: request.reviewFolder, newFolderParents: parents,
-                                      corrections: request.corrections, group: true)),
-            .user(user),
-        ]) { Self.problem(with: $0, folders: folders, newFolderParents: parents) }
-        // Not asked whether they belong together: the group comes from the model's own cards.
-        return GroupSuggestion(belongTogether: true,
-                               suggestion: Self.suggestion(from: answer, newFolderParents: parents, newName: nil))
+    public func decide(_ request: DecisionRequest) async throws -> FolderDecision {
+        let card = try? await card(for: request.facts)
+        return try await ask(FolderDecision.self, thinking: true, [
+            .system(Self.decisionSystem(newFolderParents: request.newFolderParents)),
+            .user(Self.decisionMessage(request, card: card)),
+        ]) { $0.problem(in: request) }
     }
 
     // MARK: - Keep this folder together, or unpack it?

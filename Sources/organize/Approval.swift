@@ -14,12 +14,23 @@ struct Approval {
         }
     }
 
+    /// A group (a new file and the earlier files the model put with it) is asked about once:
+    /// all of it or none of it.
     private func oneByOne(_ actions: [ProposedAction]) -> [ProposedAction] {
+        var units: [[ProposedAction]] = []
+        for action in actions {
+            if let group = action.groupID, let index = units.firstIndex(where: { $0.first?.groupID == group }) {
+                units[index].append(action)
+            } else {
+                units.append([action])
+            }
+        }
         var approved: [ProposedAction] = []
-        for (index, action) in actions.enumerated() {
-            print("\n[\(index + 1)/\(actions.count)] \(printer.describe(action))")
+        for (index, unit) in units.enumerated() {
+            let shown = unit.map(printer.describe).joined(separator: "\n   + ")
+            print("\n[\(index + 1)/\(units.count)] \(unit.count > 1 ? "Together: " : "")\(shown)")
             switch prompt("   [y] yes · [n] no · [q] stop asking (skip the rest): ") {
-            case "y": approved.append(action)
+            case "y": approved += unit
             case "q": return approved
             default: continue
             }

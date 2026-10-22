@@ -286,14 +286,16 @@ struct OrganizeNowControl: View {
     }
 }
 
-/// Files the quick scan left for Organize Now.
+/// Files the quick scan left for Organize Now (or, given `items`, any waiting files).
 struct WaitingList: View {
     @Environment(AppModel.self) private var model
+    var items: [WaitingItem]?
     var limit = 50
 
     var body: some View {
+        let shown = items ?? model.waiting
         VStack(alignment: .leading, spacing: 4) {
-            ForEach(model.waiting.prefix(limit)) { item in
+            ForEach(shown.prefix(limit)) { item in
                 HStack(spacing: 6) {
                     FileIcon(url: item.source)
                     Text(item.name).lineLimit(1).truncationMode(.middle)
@@ -302,8 +304,8 @@ struct WaitingList: View {
                 }
                 .font(.callout)
             }
-            if model.waiting.count > limit {
-                Text("and \(model.waiting.count - limit) more").font(.caption).foregroundStyle(.secondary)
+            if shown.count > limit {
+                Text("and \(shown.count - limit) more").font(.caption).foregroundStyle(.secondary)
             }
         }
     }

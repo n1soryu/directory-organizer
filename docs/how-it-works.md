@@ -8,7 +8,7 @@ used only for files the rules can't place.
 
 **Core principle:** the model never moves files or runs commands. It only *suggests* a
 destination, a name and tags. Swift code checks every suggestion and performs the move.
-A wrong guess sends the file to the review folder; it is never lost.
+When the model is unsure, the file simply waits in Downloads; nothing is ever lost.
 
 ```
 ~/Downloads → facts → rules → model (leftovers only) → proposed action → checks → plan → you approve → move + undo log
@@ -28,7 +28,7 @@ A wrong guess sends the file to the review folder; it is never lost.
 **Next (approved 2026-10-14):** a model-led app with few rules, in phases:
 1. Folders in Downloads: read inside, safety-checked, left alone while changing, unpacked when the model says so ✅ (0.7.0-dev)
 2. Folder profiles learned from your own folders (replacing the fixed folder list and personal prompt) ✅
-3. Grouping: code groups similar files, the model decides per group; new folders only for groups of 2–3+ ✅
+3. Grouping: similar files are placed together; a new folder only for a new file plus earlier files ✅ (decisions with the catalog: MLX E)
 4. Evaluation harness (the old Milestone 6), before any autonomy
 5. Only universal rules left (safety, installers, code projects, incomplete downloads); NSU/FSAE/course rules removed
 6. Earned autonomy: per-folder trust from your approvals; undo and corrections lower it
@@ -107,7 +107,7 @@ Music folders until real use is switched on deliberately.
 10. **Images** → `Pictures/Downloaded Images`. In Organize Now the vision model looks at them first:
     a document-like image (receipt, bill, ticket, letter, chart, slide…) skips this rule and is
     decided like a document; a picture (photo, meme, screenshot of an app) stays here, with a real name.
-11. Anything else → the model (below). If it's unavailable or unsure: review.
+11. Anything else → the model (below). If it's unsure, the file waits in Downloads; without the model: review.
 
 ## Your folders, learned (folder profiles)
 
@@ -132,34 +132,32 @@ were downloaded from, and the Finder tags most of them carry (2+ files and 60%+)
   Documents/FSAE") and up to 3 relevant ones are shown to the model next time. Moves you keep
   teach by example: the file becomes one of the folder's examples.
 
-## Similar files, placed together (grouping)
+## Similar files, placed together (decisions with the catalog)
 
-In Organize Now, every leftover (no rule, not a duplicate, readable) first gets a **card** from
-the model: its kind ("electricity bill"), issuer, subject, date, people, a suggested name and a
-one-line summary. **Code groups** them by the kind's main word ("electricity bill" / "gas bill").
-Vague words (files, documents, misc) don't group. (Grouping by meaning, with embeddings of the
-cards, comes with the catalog in MLX Milestone D; Apple's sentence embedding is gone.)
+In Organize Now, every leftover (no rule, not a duplicate, readable) gets a **card** from the
+model (its kind, issuer, subject, date, people, a suggested name and a one-line summary) and an
+embedding of that card. Then each leftover gets **one decision**, oldest first. The model sees the
+new file, its **5 nearest earlier files** from the catalog (filed by the app, or waiting in
+Downloads; no similarity cut-off) with the folder each is in, and your folders with their purposes:
 
-- Each group of 2+ is **placed in one question**: the model sees all of them (up to 8) and picks an
-  existing folder or a new one. Its answer goes through the same checks as a single file's.
-- **Only a group can create a new folder.** A file placed on its own may go to an existing folder
-  or to one a group just created; a new folder of its own goes to review, even if another lone
-  file picked the same name (that's chance, not a pattern).
-- Group names are deterministic: the most common category, on a tie the more general one.
-- `organize describe <file>…` prints a file's card.
+- **join:** the file goes into an existing folder. It may take earlier files along (`move_earlier`).
+- **new_folder:** a folder for the new file *and* at least one earlier file, under the right parent
+  for its type ("Documents/Manuals"). A new folder is never made for one file.
+- **wait:** nothing belongs with it yet. It stays in Downloads, carded and catalogued, listed as
+  *waiting for a match*, and isn't asked about again. It's reconsidered only when a new similar
+  file lists it among its earlier files.
 
-What didn't work, measured with the real model (kept here so it isn't tried again):
-- Grouping by embeddings of the file text: the airfryer manual came out closer to a bill (0.87)
-  than to the other manual (1.05). Short labels written by the model group well.
-- Asking the model "do these belong together?": it said no even to two bills it had just called
-  "electricity and water bills", before and after describing them. The group comes from its own
-  labels instead.
-- Example names in prompts ("Manuals", "Bills", later "Contracts", "Recipes") get copied as folder
-  names for unrelated files. Prompt examples must not match the test data, and are best kept few.
+Within one run, each decided file joins the catalog straight away (waiting, or "proposed" for its
+folder), so the second of two manuals sees the first and can make a folder for both. An earlier
+file already placed by this run stays with that decision (the first one wins).
 
-**Stalls:** every text recognition has 30 s; a stalled one counts as "unreadable" (so: review).
-Model answers have no time limit but a length limit (4,096 thinking + 512 answer tokens), and
-Cancel stops them.
+**Moving earlier files always asks first.** The new file and the earlier files moving with it are
+one **group** in Pending ("earlier file" marks them): approved or rejected together, never
+auto-applied, applied as one batch (so undo puts the whole group back), and skipped whole if any of
+its files changed or went away since the plan. Only files the app filed itself, or files waiting in
+Downloads, can ever be pulled; files you filed yourself are never in the catalog.
+
+`organize describe <file>…` prints a file's card.
 
 ## The vision model (Qwen3-VL 4B, for images)
 
@@ -183,10 +181,9 @@ duplicates and folders are never in it.
 - **Where a file is now isn't stored:** it's worked out from the move log and the disk each time the
   catalog is read. Moved by the app and still there → *filed*; undone → *undone*; never moved and still
   in Downloads → *waiting*; not where it should be → *gone*. Only filed and waiting files are offered as similar.
-- **Similar files in one run:** each leftover's embedding is linked to its nearest neighbour when they're
-  at least 0.75 similar (fixed from the benchmark, not tuned on the sandbox); linked files form a group,
-  and the model still decides whether a group belongs together. Without the embedder, groups come from
-  shared main words as before.
+- **Earlier files for decisions:** the 5 nearest live files to a new file's embedding (see above).
+  Without the embedder there are no earlier files: a file can join a folder or wait, but no new
+  folder can be made.
 - **Nothing is described twice:** a file found in the catalog by its hash (waiting in Downloads, or
   downloaded again) gets its old card back instead of a new model question.
 - **Back-fill:** each Organize Now cards and embeds up to 40 earlier files the app filed that aren't
@@ -202,10 +199,10 @@ loads it at its first question (about 5 GB of memory) and releases it at the end
 rules can't decide, and only ever *suggests*:
 
 - **Cards:** what a leftover file is (kind, issuer, subject, date, people, suggested name, summary),
-  thinking off, ~5 s. One card per file serves both grouping and naming.
-- **Leftover files:** *which folder fits, or which new category folder?* in one answer, with
-  thinking on (~1 min: the benchmark showed folder decisions need it). The folders are listed
-  with their purposes and examples, plus your corrections.
+  thinking off, ~5 s. One card per file serves the catalog, decisions and naming.
+- **Leftover files:** join / new_folder / wait, with the nearest earlier files (above), thinking on
+  (~1 min: the benchmark showed folder decisions need it). The prompt is the benchmark's (11/12),
+  with your folders' purposes and your corrections added.
 - **Folders in Downloads:** keep together or unpack (thinking on); **your folders:** what each is for
   (thinking off).
 - **Unclear names:** the card's suggested name, trusted when the file has text or the vision model
@@ -213,21 +210,22 @@ rules can't decide, and only ever *suggests*:
 - It never sees the file system and never acts. It receives a text summary of the facts, one fresh
   chat per question, greedy (repeatable) sampling. Answers are JSON; one that's invalid (not JSON,
   a folder that isn't on the list, a new folder under the wrong parent) is sent back with what's
-  wrong, at most twice, then the file goes to review.
+  wrong, at most twice; then the file waits in Downloads.
 
 Swift then checks every answer:
-- the folder must be one that was offered, or a valid new folder (right parent for the file
-  type, at most 2 levels, a sane name). A near-duplicate name reuses the existing folder:
-  "Manual" → "Manuals".
+- **join:** the folder must be one that was offered. **new_folder:** right parent for the file
+  type, at most 2 levels, a sane name, not existing yet, and at least one earlier file that isn't
+  already there. A near-duplicate name reuses the existing folder: "Manual" → "Manuals".
+- `move_earlier` may only name the earlier files listed; ones already in that folder are dropped.
+- Never Downloads, the review folder or `Documents/Secure` (Secure is only for what the safety
+  checks find). Anything rejected means the file waits, with the reason shown.
 - University folders need NSU evidence the model can't make up: a northsouth.edu source,
   "North South University" in the text, or a known course code.
 - **Tags come from the folder** (the ones most of its files carry), never from the model.
-- `Documents/Secure` only with high confidence; a guess goes to review instead.
 - The answer starts with its `reason`: a reason written after the choice would only defend it.
 - **Unreadable is not clean:** if text recognition fails (it's retried once), the file can't be
   checked for sensitive text, so it goes to review, never into a folder as if it were safe.
-- confidence is chosen as high / medium / low (models are poor at exact numbers):
-  0.9 / 0.75 / 0.4, with a threshold of 0.75. Below it, the file goes to review.
+- the answer has no confidence of its own: a join is shown as 85%, a new folder as 80%.
 - if the model isn't downloaded, or MLX's GPU shaders weren't built, leftovers simply go to review.
 - sensitive files (safety rules) are never renamed by the model.
 

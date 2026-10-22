@@ -98,9 +98,10 @@ import Testing
         #expect(photo.decidedBy == .rule("image"))
         #expect(photo.finalName.hasSuffix("Red bicycle by a wall.jpg"))
 
-        // The receipt went to the model like a document (here it gave no valid answer: review).
-        let receipt = try #require(byName["IMG_0002.jpg"])
-        #expect(receipt.decidedBy == .classifier("qwen3"))
+        // The receipt went to the model like a document (here it gave no valid answer, so it
+        // waits in Downloads).
+        #expect(byName["IMG_0002.jpg"] == nil)
+        #expect(plan.waiting.contains { $0.name == "IMG_0002.jpg" && $0.forMatch })
         #expect(text.prompts.contains { $0.contains("IMG_0002.jpg") })
 
         let unknown = try #require(byName["IMG_0003.jpg"])

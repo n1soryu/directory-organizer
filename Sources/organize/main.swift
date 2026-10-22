@@ -147,6 +147,11 @@ func makePlan(_ folder: URL, _ home: URL, useModel: Bool, quick: Bool = false) a
     }
     do {
         let plan = try await planner.plan(folder: folder)
+        if let engine {
+            let memory = engine.memory()
+            FileHandle.standardError.write(Data(String(format: "note: GPU memory: peak %.1f GB in use, %.1f GB cached at the end\n",
+                                                       Double(memory.peak) / 1e9, Double(memory.cache) / 1e9).utf8))
+        }
         await engine?.unloadAll()
         try? store.save(plan.profiles)
         do {

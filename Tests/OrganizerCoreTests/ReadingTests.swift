@@ -43,9 +43,9 @@ import Testing
         let facts = await FactExtractor().facts(for: url)
         #expect(facts.needsDeepRead)
         #expect(facts.notes.contains("PDF is password-protected"))
-        let decision = await Planner(homeRoot: root).decide(facts)
-        #expect(decision.destination == OrganizerConfig().reviewFolder)
-        #expect(decision.source == .safety("unreadable"))
+        let decision = await Planner(homeRoot: root).decide(facts).decision
+        #expect(decision?.destination == OrganizerConfig().reviewFolder)
+        #expect(decision?.source == .safety("unreadable"))
     }
 
     /// HIGH-7: UTF-16 text used to be skipped as binary.

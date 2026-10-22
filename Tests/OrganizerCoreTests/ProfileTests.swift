@@ -22,8 +22,8 @@ import Testing
         private let lock = NSLock()
         private var _asked: [String] = []
         var asked: [String] { lock.withLock { _asked } }
-        func suggest(_ request: ClassificationRequest) async throws -> ClassifierSuggestion {
-            ClassifierSuggestion(destination: request.reviewFolder, confidence: 0.9, reason: "")
+        func decide(_ request: DecisionRequest) async throws -> FolderDecision {
+            throw ClassifierError.unavailable("no decisions in this test")
         }
         func suggestName(for facts: FileFacts) async throws -> NameSuggestion { throw ClassifierError.unavailable("") }
         func describeFolder(_ profile: FolderProfile) async throws -> String {
@@ -108,12 +108,15 @@ import Testing
         let folders = FolderCatalog.universal(config) + [
             FolderOption(path: "Documents/Bills", purpose: "electricity and water bills", tags: [], examples: ["desco_sep.pdf"]),
         ]
-        let prompt = MLXClassifier.instructions(folders: folders, review: config.reviewFolder, newFolderParents: ["Documents"],
-                                                corrections: [Correction(fileName: "notes.txt", wrongFolder: "Documents/Bills").sentence])
+        let request = DecisionRequest(facts: facts(name: "x.pdf", text: "a bill"), folders: folders, earlier: [],
+                                      newFolderParents: ["Documents"],
+                                      corrections: [Correction(fileName: "notes.txt", wrongFolder: "Documents/Bills").sentence])
+        let prompt = MLXClassifier.decisionSystem(newFolderParents: ["Documents"]) + "\n"
+            + MLXClassifier.decisionMessage(request, card: nil)
         for personal in ["North South", "NSU", "Formula", "economics", "Bangladesh"] {
             #expect(!prompt.contains(personal), "\(personal) in the prompt")
         }
-        #expect(prompt.contains("Documents/Bills: electricity and water bills (holds e.g. desco_sep.pdf)"))
+        #expect(prompt.contains("- Documents/Bills: electricity and water bills"))
         #expect(prompt.contains("\"notes.txt\" does not belong in Documents/Bills"))
     }
 
@@ -137,8 +140,8 @@ import Testing
         var image = facts(name: "IMG_1.jpg", text: "")
         image.kind = .image
         image.needsDeepRead = true      // text recognition failed
-        let decision = await Planner(homeRoot: home).decide(image)
-        #expect(decision.destination == config.reviewFolder)
-        #expect(decision.source == .safety("unreadable"))
+        let decision = await Planner(homeRoot: home).decide(image).decision
+        #expect(decision?.destination == config.reviewFolder)
+        #expect(decision?.source == .safety("unreadable"))
     }
 }

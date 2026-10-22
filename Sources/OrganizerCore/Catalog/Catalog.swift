@@ -28,9 +28,13 @@ public struct CatalogEntry: Codable, Sendable, Equatable {
     /// `ModelSpec.id` of the embedder: vectors of different models are never compared.
     public var embedder: String
     public var decidedBy: String?
+    /// The model said "wait": it stays in Downloads and isn't decided again until a similar
+    /// file arrives. (nil in entries from before decisions used the catalog.)
+    public var waited: Bool?
 
     public init(time: Date = Date(), sha256: String?, moveID: UUID? = nil, path: String, card: FileCard?,
-                cardSource: CardSource, line: String, embedding: String, embedder: String, decidedBy: String? = nil) {
+                cardSource: CardSource, line: String, embedding: String, embedder: String, decidedBy: String? = nil,
+                waited: Bool? = nil) {
         self.time = time
         self.sha256 = sha256
         self.moveID = moveID
@@ -41,6 +45,7 @@ public struct CatalogEntry: Codable, Sendable, Equatable {
         self.embedding = embedding
         self.embedder = embedder
         self.decidedBy = decidedBy
+        self.waited = waited
     }
 
     /// Which file this is about: its content hash, or the move for an unhashed file.
@@ -176,35 +181,5 @@ public struct Catalog: Sendable {
             .sorted { $0.1 > $1.1 }
             .prefix(k)
             .map { (item: $0.0, score: $0.1) }
-    }
-}
-
-/// Groups of similar files by meaning: each file is linked to its nearest neighbour when that
-/// neighbour is at least `floor` similar, and linked files form groups. The floor only proposes
-/// candidates; the model decides whether they really belong together (a similarity cut-off
-/// can't tell "no match", the benchmark showed).
-public enum SimilarityGrouper {
-    /// Fixed from the benchmark (true matches scored 0.87–0.89 at the top), before any sandbox run.
-    public static let floor: Float = 0.75
-
-    /// Groups of indices into `vectors`, biggest first; files with no near neighbour are groups of one.
-    public static func groups(_ vectors: [[Float]], floor: Float = floor) -> [[Int]] {
-        var parent = Array(vectors.indices)
-        func root(_ i: Int) -> Int {
-            var i = i
-            while parent[i] != i { parent[i] = parent[parent[i]]; i = parent[i] }
-            return i
-        }
-        for i in vectors.indices {
-            var best: (index: Int, score: Float)?
-            for j in vectors.indices where j != i {
-                let score = Vectors.cosine(vectors[i], vectors[j])
-                if score > (best?.score ?? -1) { best = (j, score) }
-            }
-            if let best, best.score >= floor { parent[root(best.index)] = root(i) }
-        }
-        return Dictionary(grouping: vectors.indices, by: root).values
-            .map { $0.sorted() }
-            .sorted { $0.count != $1.count ? $0.count > $1.count : $0[0] < $1[0] }
     }
 }

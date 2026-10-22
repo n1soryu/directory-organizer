@@ -22,8 +22,8 @@ import TestDataKit
 
         init(unpack: Set<String>) { self.unpack = unpack }
 
-        func suggest(_ request: ClassificationRequest) async throws -> ClassifierSuggestion {
-            ClassifierSuggestion(destination: request.reviewFolder, confidence: 0.9, reason: "fake")
+        func decide(_ request: DecisionRequest) async throws -> FolderDecision {
+            throw ClassifierError.unavailable("fake")
         }
         func suggestName(for facts: FileFacts) async throws -> NameSuggestion {
             throw ClassifierError.unavailable("fake")

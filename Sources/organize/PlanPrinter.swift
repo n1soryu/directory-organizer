@@ -27,7 +27,7 @@ struct PlanPrinter {
                 let name = action.isRenamed
                     ? "\(action.originalName) \(dim("→")) \(cyan(action.finalName))"
                     : action.originalName
-                Swift.print("   \(name)")
+                Swift.print("   \(action.isEarlierFile ? dim("↳ earlier: ") : "")\(name)")
                 var details = [String(format: "%3ld%%", Int((action.confidence * 100).rounded()))]
                 if !action.tags.isEmpty { details.append(action.tags.map(\.name).joined(separator: ", ")) }
                 details.append(action.decidedBy.description)
@@ -37,9 +37,16 @@ struct PlanPrinter {
             Swift.print("")
         }
 
-        if !plan.waiting.isEmpty {
+        let forMatch = plan.waiting.filter(\.forMatch)
+        if !forMatch.isEmpty {
+            Swift.print(bold("Waiting for a match (stays in Downloads)"))
+            for item in forMatch { Swift.print("   \(item.name) \(dim("· " + item.reason))") }
+            Swift.print("")
+        }
+        let forFullRun = plan.waiting.filter { !$0.forMatch }
+        if !forFullRun.isEmpty {
             Swift.print(bold("Waiting for a full run (Organize Now)"))
-            for item in plan.waiting { Swift.print("   \(item.name) \(dim("· " + item.reason))") }
+            for item in forFullRun { Swift.print("   \(item.name) \(dim("· " + item.reason))") }
             Swift.print("")
         }
 
@@ -57,9 +64,11 @@ struct PlanPrinter {
         }.count
         let named = plan.actions.filter { $0.reason.contains("name suggested by the model") }.count
         let toReview = plan.actions.filter { $0.destinationFolder == OrganizerConfig().reviewFolder }.count
-        Swift.print(bold("\(plan.actions.count) items: ") +
-            "\(byRules) placed by rules, \(bySafety) by safety checks, \(leftovers) left for the model " +
-            "(\(placedByModel) placed by it); \(named) renamed by the model; " +
+        let earlier = plan.actions.filter(\.isEarlierFile).count
+        Swift.print(bold("\(plan.actions.count) moves: ") +
+            "\(byRules) placed by rules, \(bySafety) by safety checks, \(leftovers) by the model " +
+            "(\(placedByModel) placed by it\(earlier > 0 ? ", \(earlier) of them earlier files" : "")); " +
+            "\(forMatch.count) waiting for a match; \(named) renamed by the model; " +
             "\(toReview) going to review, \(alerts.count) alert(s).")
     }
 

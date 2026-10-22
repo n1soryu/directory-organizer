@@ -22,6 +22,9 @@ files and adds Finder tags. Simple rules handle the obvious cases; an on-device 
   It can propose new category folders ("Manuals", "Bills").
 - **Remembers what it has seen:** a local catalog of short descriptions and embeddings finds similar
   files by meaning ("router user guide" and "airfryer manual") and never describes a file twice.
+- **Regroups as files arrive:** a new file can join a folder or start a new one together with
+  earlier files (always with your approval, undone as one group). When nothing fits yet, it simply
+  waits in Downloads for a match.
 - **Folders too:** a downloaded folder is checked all the way down; the model decides whether it's
   one thing to keep together or a bag of files to unpack and sort one by one.
 - **Safety first, in code, not left to the model:** never deletes, never overwrites (dated names

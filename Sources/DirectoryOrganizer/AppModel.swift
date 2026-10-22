@@ -119,6 +119,8 @@ final class AppModel {
     private(set) var skipped: [SkippedItem] = []
     /// Files the quick scan couldn't decide: they wait for Organize Now.
     private(set) var waiting: [WaitingItem] = []
+    /// Files Organize Now looked at with nothing like them yet: they stay in Downloads.
+    private(set) var waitingForMatch: [WaitingItem] = []
     /// Set while Organize Now runs.
     private(set) var organizing: FullRun?
     private(set) var lastFullRun: FullRunSummary?
@@ -178,6 +180,11 @@ final class AppModel {
     /// Folders Organize Now unpacked (by path), with the moves planned for what's inside.
     /// Quick scans only see the folder, so they show these instead while they still apply.
     private var deepUnpacked: [String: [ProposedAction]] = [:]
+    /// Organize Now's "wait" verdicts, per file version.
+    private var deepWaiting: [FileIdentity: WaitingItem] = [:]
+    /// Earlier files outside the watched folder that move with a new one (grouped by `groupID`).
+    /// Quick scans don't see them, so they're added back while their group's new file is pending.
+    private var deepEarlier: [ProposedAction] = []
     private var retryTask: Task<Void, Never>?
     /// Auto-apply as it was in the sandbox, restored when switching back to it.
     private var sandboxAutoApply: AutoApplyPolicy?
@@ -281,10 +288,20 @@ final class AppModel {
         let fromUnpacked = plan.waiting.flatMap { item in
             (deepUnpacked[item.source.path] ?? []).filter { FileIdentity.current($0.source) == FileIdentity($0) }
         }
-        let allActions = plan.actions.map { deepResults[FileIdentity($0)] ?? $0 }
+        deepWaiting = deepWaiting.filter { present.contains($0.key) }
+        var allActions = plan.actions.map { deepResults[FileIdentity($0)] ?? $0 }
             + plan.waiting.compactMap { deepResults[$0.identity] }
             + fromUnpacked
-        waiting = plan.waiting.filter { deepResults[$0.identity] == nil && deepUnpacked[$0.source.path] == nil }
+        // Earlier files moving with a pending new file, while they're unchanged where they were.
+        let groups = Set(allActions.compactMap(\.groupID))
+        deepEarlier = deepEarlier.filter { $0.groupID.map(groups.contains) == true }
+        allActions += deepEarlier.filter { FileIdentity.current($0.source) == FileIdentity($0) }
+        // A group whose earlier files are gone or changed would make a folder for one file: drop it.
+        let complete = Set(allActions.filter(\.isEarlierFile).compactMap(\.groupID))
+        allActions.removeAll { $0.groupID.map { !complete.contains($0) } == true }
+        let unresolved = plan.waiting.filter { deepResults[$0.identity] == nil && deepUnpacked[$0.source.path] == nil }
+        waitingForMatch = unresolved.compactMap { deepWaiting[$0.identity] }
+        waiting = unresolved.filter { deepWaiting[$0.identity] == nil }
 
         let rejectedIDs = Set(settings.rejected)
         pending = allActions.filter { !rejectedIDs.contains(FileIdentity($0)) }
@@ -399,6 +416,9 @@ final class AppModel {
                 }
             }
             deepResults = Dictionary(plan.actions.map { (FileIdentity($0), $0) }, uniquingKeysWith: { $1 })
+            deepWaiting = Dictionary(plan.waiting.filter(\.forMatch).map { ($0.identity, $0) }, uniquingKeysWith: { $1 })
+            let watched = folder.standardizedFileURL.path + "/"
+            deepEarlier = plan.actions.filter { $0.isEarlierFile && !$0.source.standardizedFileURL.path.hasPrefix(watched) }
             keepProfiles(plan.profiles)
             do {
                 try catalogStore.append(plan.catalogEntries)
@@ -476,8 +496,14 @@ final class AppModel {
 
     // MARK: - Approving and rejecting
 
+    /// The chosen moves plus every move grouped with them: a group goes all together or not at all.
+    private func withGroups(_ ids: Set<ProposedAction.ID>, in actions: [ProposedAction]) -> [ProposedAction] {
+        let groups = Set(actions.filter { ids.contains($0.id) }.compactMap(\.groupID))
+        return actions.filter { ids.contains($0.id) || $0.groupID.map(groups.contains) == true }
+    }
+
     func approve(_ ids: Set<ProposedAction.ID>) {
-        let actions = pending.filter { ids.contains($0.id) }
+        let actions = withGroups(ids, in: pending)
         // One apply or undo at a time (a double-click mustn't start two).
         guard !actions.isEmpty, !isApplying else { return }
         isApplying = true
@@ -488,7 +514,8 @@ final class AppModel {
 
     func reject(_ ids: Set<ProposedAction.ID>) {
         guard !isApplying else { return }
-        let actions = pending.filter { ids.contains($0.id) }
+        let actions = withGroups(ids, in: pending)
+        let ids = Set(actions.map(\.id))
         settings.rejected.append(contentsOf: actions.map(FileIdentity.init))
         pending.removeAll { ids.contains($0.id) }
         rejected.append(contentsOf: actions)
@@ -499,7 +526,8 @@ final class AppModel {
     /// Puts rejected files back into the plan.
     func reconsider(_ ids: Set<ProposedAction.ID>) {
         guard !isApplying else { return }
-        let actions = rejected.filter { ids.contains($0.id) }
+        let actions = withGroups(ids, in: rejected)
+        let ids = Set(actions.map(\.id))
         let identities = Set(actions.map(FileIdentity.init))
         settings.rejected.removeAll { identities.contains($0) }
         rejected.removeAll { ids.contains($0.id) }

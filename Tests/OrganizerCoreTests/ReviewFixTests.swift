@@ -45,26 +45,23 @@ import Testing
 
     struct Answer: FileClassifier {
         let name = "answer"
-        var destination: String
-        var confidence: Double
-        func suggest(_ request: ClassificationRequest) async throws -> ClassifierSuggestion {
-            ClassifierSuggestion(destination: destination, confidence: confidence, reason: "because")
+        var folder: String
+        func decide(_ request: DecisionRequest) async throws -> FolderDecision {
+            FolderDecision(reason: "because", action: .join, folder: folder)
         }
         func suggestName(for facts: FileFacts) async throws -> NameSuggestion { throw ClassifierError.unavailable("") }
     }
 
-    /// MED-13: a guess into a Secure subfolder needs the same high confidence as Secure.
-    /// MED-14: a confidence that isn't a number doesn't crash; it counts as none.
-    @Test(arguments: [("Documents/Secure/IDs", 0.8), ("Documents/Essays", Double.nan), ("Documents/Essays", .infinity)])
-    func unsureOrNonsenseAnswersGoToReview(_ destination: String, _ confidence: Double) async throws {
-        for folder in ["Documents/Secure/IDs", "Documents/Essays"] {
-            try FileManager.default.createDirectory(at: root.appending(path: folder), withIntermediateDirectories: true)
-        }
+    /// MED-13: the model can never put a file in Secure (or a folder inside it): that's only for
+    /// what the safety checks find. Nor in review: unsure means the file waits in Downloads.
+    @Test(arguments: ["Documents/Secure/IDs", "Documents/Secure", "Desktop/To Delete (Review)"])
+    func secureAndReviewAreNeverTheModelsChoice(_ folder: String) async throws {
+        try FileManager.default.createDirectory(at: root.appending(path: folder), withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
         var planner = Planner(homeRoot: root)
-        planner.classifier = Answer(destination: destination, confidence: confidence)
-        let decision = await planner.decide(facts(name: "scan.txt", text: "something"))
-        #expect(decision.destination == planner.config.reviewFolder, "\(destination) \(confidence)")
+        planner.classifier = Answer(folder: folder)
+        let verdict = await planner.decide(facts(name: "scan.txt", text: "something"))
+        #expect(verdict.waitReason != nil, "\(folder)")
     }
 
     /// MED-16: tags that are there but unreadable stop the move (undo couldn't restore them).
@@ -99,7 +96,7 @@ import Testing
         try Data().write(to: root.appending(path: "Home/Documents/Notes/old.txt"))
         try Data().write(to: root.appending(path: "Downloads/new.txt"))
         var planner = Planner(homeRoot: root.appending(path: "Home"))
-        planner.classifier = Answer(destination: "Documents/Notes", confidence: 0.9)
+        planner.classifier = Answer(folder: "Documents/Notes")
         let action = try #require(try await planner.plan(folder: root.appending(path: "Downloads")).actions.first)
         #expect(!action.alerts.contains { $0.kind == .duplicate })
     }

@@ -42,6 +42,9 @@ struct PendingView: View {
             if !model.waiting.isEmpty && !showRejected {
                 WaitingCard()
             }
+            if !model.waitingForMatch.isEmpty && !showRejected {
+                MatchCard()
+            }
 
             if groups.isEmpty {
                 emptyState
@@ -181,6 +184,40 @@ private struct WaitingCard: View {
     }
 }
 
+/// Files Organize Now looked at, with nothing like them yet: they stay in Downloads until a
+/// similar file arrives, and then may move together with it.
+private struct MatchCard: View {
+    @Environment(AppModel.self) private var model
+    @ViewState private var expanded = false
+
+    var body: some View {
+        Card {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 12) {
+                    Image(systemName: "hourglass")
+                        .font(.title3).foregroundStyle(.white)
+                        .frame(width: 38, height: 38)
+                        .background(Color.teal.gradient, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("\(model.waitingForMatch.count) file\(model.waitingForMatch.count == 1 ? "" : "s") waiting for a match")
+                            .font(.headline)
+                        Text("Nothing like them yet, so they stay in Downloads. When a similar file arrives, they can move together.")
+                            .font(.callout).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button(expanded ? "Hide" : "Show") { withAnimation(.snappy) { expanded.toggle() } }
+                        .buttonStyle(SoftButtonStyle(tint: .teal))
+                }
+                if expanded {
+                    WaitingList(items: model.waitingForMatch, limit: 30)
+                        .padding(.leading, 50)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+            }
+        }
+    }
+}
+
 /// One destination: header with the lane, path, tags and a group approve, then its files.
 private struct LaneCard: View {
     @Environment(AppModel.self) private var model
@@ -239,7 +276,15 @@ private struct FileRow: View {
         HStack(spacing: 12) {
             FileIcon(url: action.source, size: 30)
             VStack(alignment: .leading, spacing: 2) {
-                Text(action.originalName).fontWeight(.medium).lineLimit(1).truncationMode(.middle)
+                HStack(spacing: 6) {
+                    Text(action.originalName).fontWeight(.medium).lineLimit(1).truncationMode(.middle)
+                    if action.isEarlierFile {
+                        Text("earlier file").font(.caption2.weight(.semibold)).foregroundStyle(.teal)
+                            .padding(.horizontal, 6).padding(.vertical, 1)
+                            .background(.teal.opacity(0.12), in: Capsule())
+                            .help("Already filed or waiting: moves together with the new file. Approving or rejecting one approves or rejects the whole group.")
+                    }
+                }
                 if action.isRenamed {
                     Label(action.finalName, systemImage: "arrow.turn.down.right")
                         .font(.caption).foregroundStyle(.blue).lineLimit(1).truncationMode(.middle)

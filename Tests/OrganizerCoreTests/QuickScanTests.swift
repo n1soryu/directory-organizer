@@ -12,7 +12,7 @@ import TestDataKit
     /// Fails the test if the model is asked anything.
     struct NoModelAllowed: FileClassifier {
         let name = "must-not-be-called"
-        func suggest(_ request: ClassificationRequest) async throws -> ClassifierSuggestion {
+        func decide(_ request: DecisionRequest) async throws -> FolderDecision {
             Issue.record("quick scan asked the model about \(request.facts.name)")
             throw ClassifierError.unavailable("test")
         }

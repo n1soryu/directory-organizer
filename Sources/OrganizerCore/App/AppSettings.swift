@@ -84,6 +84,7 @@ public struct AutoApplyPolicy: Codable, Equatable, Sendable {
 
     public func allows(_ action: ProposedAction) -> Bool {
         guard case .rule(let rule) = action.decidedBy,
+              action.groupID == nil,   // moves of earlier files always ask first
               action.alerts.isEmpty,
               action.confidence >= Self.minimumConfidence else { return false }
         return Self.categories.contains { enabled.contains($0.id) && $0.rules.contains(rule) }

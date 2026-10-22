@@ -26,6 +26,10 @@ import Testing
         let all = AutoApplyPolicy(enabled: Set(AutoApplyPolicy.categories.map(\.id)))
         #expect(!all.allows(action(.classifier("apple"))))
         #expect(!all.allows(action(.safety("sensitive file"))))
+        // A move in a group (earlier files moving with a new one) always asks, whoever decided it.
+        var grouped = action(.rule("video"))
+        grouped.groupID = UUID()
+        #expect(!all.allows(grouped))
     }
 
     @Test func reviewReminderEveryEightHoursWhileNotEmpty() {
