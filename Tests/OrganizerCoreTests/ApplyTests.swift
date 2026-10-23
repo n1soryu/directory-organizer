@@ -55,10 +55,10 @@ import TestDataKit
         #expect(results.allSatisfy { $0.outcome == .moved }, "\(results.filter { $0.outcome != .moved }.map(\.outcome))")
         #expect(try FileManager.default.contentsOfDirectory(atPath: downloads.path) == ["bigfile.zip.crdownload"])
 
-        let outline = home.appending(path: "Documents/University/ECO201/ECO201 Course Outline.pdf")
-        #expect(FinderTags.read(outline) == [.nsu])
-        let origin = try #require(MoveOrigin.read(outline)?.originalPath)
-        #expect(URL(filePath: origin).lastPathComponent == "document (3).pdf")
+        let phrase = home.appending(path: "Documents/Secure/\(FileNames.day(Date())) Recovery Phrase.jpg")
+        #expect(FinderTags.read(phrase) == [.secure])
+        let origin = try #require(MoveOrigin.read(phrase)?.originalPath)
+        #expect(URL(filePath: origin).lastPathComponent == "IMG_5012.jpg")
         #expect(URL(filePath: origin).deletingLastPathComponent().resolvingSymlinksInPath() == downloads.resolvingSymlinksInPath())
         #expect(FileManager.default.fileExists(atPath: home.appending(path: "Movies/Films/Avengers Infinity War.mpeg").path))
 
@@ -104,14 +104,14 @@ import TestDataKit
     @Test func refusesSymlinksOutOfTheHomeFolder() async throws {
         let plan = try await setUp()
         defer { cleanUp() }
-        // Documents/FSAE now points somewhere outside the home folder.
+        // Movies/Films now points somewhere outside the home folder.
         let outside = root.appending(path: "Elsewhere")
         try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
-        let fsae = home.appending(path: "Documents/FSAE")
-        try FileManager.default.removeItem(at: fsae)
-        try FileManager.default.createSymbolicLink(at: fsae, withDestinationURL: outside)
+        let films = home.appending(path: "Movies/Films")
+        try FileManager.default.moveItem(at: films, to: root.appending(path: "Films (moved aside)"))
+        try FileManager.default.createSymbolicLink(at: films, withDestinationURL: outside)
 
-        let action = try #require(plan.actions.first { $0.originalName == "minutes_oct.docx" })
+        let action = try #require(plan.actions.first { $0.originalName == "Avengers_Infinity_War_4K_BluRay.mpeg" })
         let result = try #require(Applier(homeRoot: home, journal: journal).apply([action]).first)
         guard case .failed(let why) = result.outcome else { Issue.record("expected failure, got \(result.outcome)"); return }
         #expect(why.contains("outside the home folder"))

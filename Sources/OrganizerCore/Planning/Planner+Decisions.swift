@@ -120,7 +120,7 @@ extension Planner {
         } catch {
             return (.wait(reason: "The model couldn't answer (\(error.localizedDescription)); it stays in Downloads"), [])
         }
-        // Checked again here: the model's own check can't see the disk, NSU evidence or the plan.
+        // Checked again here: the model's own check can't see the disk or the plan.
         if let problem = answer.problem(in: request) {
             return (.wait(reason: "The model's answer was rejected (\(problem)); it stays in Downloads"), [])
         }
@@ -187,12 +187,6 @@ extension Planner {
     /// What rules out a model's destination, or nil.
     func destinationProblem(_ destination: String, facts: FileFacts) -> String? {
         if isOffLimits(destination) { return "not a folder the model may choose" }
-        if let problem = DestinationValidator.problem(with: destination, config: config) { return problem }
-        // University folders need NSU evidence the model can't invent: the download source,
-        // "North South University" in the text, or one of your course codes.
-        if destination == config.university || destination.hasPrefix(config.university + "/"), !hasNSUEvidence(facts) {
-            return "no sign it's an NSU file"
-        }
-        return nil
+        return DestinationValidator.problem(with: destination, config: config)
     }
 }

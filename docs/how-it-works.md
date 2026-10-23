@@ -30,7 +30,7 @@ When the model is unsure, the file simply waits in Downloads; nothing is ever lo
 2. Folder profiles learned from your own folders (replacing the fixed folder list and personal prompt) ✅
 3. Grouping: similar files are placed together; a new folder only for a new file plus earlier files ✅ (decisions with the catalog: MLX E)
 4. Evaluation harness (the old Milestone 6), before any autonomy ✅ (`organize eval`: MLX F)
-5. Only universal rules left (safety, installers, code projects, incomplete downloads); NSU/FSAE/course rules removed
+5. Only universal rules left (safety, installers, code projects, incomplete downloads, plus films/TV and images by type); NSU/FSAE/course rules removed ✅ (0.7.0)
 6. Earned autonomy: per-folder trust from your approvals; undo and corrections lower it
 
 ## Try it
@@ -72,7 +72,7 @@ Music folders until real use is switched on deliberately.
 ## What it reads (no model)
 
 - Name, extension, size, dates (including when the file was downloaded)
-- **Download source** (`kMDItemWhereFroms`), the strongest signal: e.g. `northsouth.edu` → NSU
+- **Download source** (`kMDItemWhereFroms`), a strong signal, shown to the model and used to shortlist folders that hold files from the same site
 - Text: PDFKit for PDFs, with **OCR for scanned PDFs** that have no text layer; the XML inside
   .docx/.xlsx/.pptx; macOS's own converter for .rtf/.doc/.odt; Vision OCR for images; the first
   256 KB of text files (UTF-8 or UTF-16) for the safety checks, of which the model sees an excerpt.
@@ -93,21 +93,13 @@ Music folders until real use is switched on deliberately.
 2. **Installers, disk images, firmware** (.dmg .iso .img .pkg .bin …) → review
 3. **Code projects** (zips containing Package.swift, .git, package.json …) → review
 4. **Empty folders** → review
-5. **NSU records by name**: dated with the download date and kept side by side in
-   `University/Records/<type>/` (Grades, Advising, Payments, Registration, Curriculum, …),
-   e.g. `2026-10-13 Grade History.pdf`
-6. **Courses**: a course code from the curriculum in the name, at the top of the text, or the
-   course's full title → `University/<CODE>/`. Unknown codes go to review instead of creating folders.
-7. **FSAE** team files → `Documents/FSAE`
-8. **NSU records by content** (after courses and FSAE, so course material that mentions
-   "registration" stays a course file)
-9. **Videos**: films → `Movies/Films/Avengers Infinity War.mpeg`, episodes →
+5. **Videos**: films → `Movies/Films/Avengers Infinity War.mpeg`, episodes →
    `Movies/TV Shows/<Show>/Show S01E04.mkv`, short clips → `Movies/Clips`. Release clutter
    (4K, BluRay, x265 …) is removed; a year is kept only if it was in the name.
-10. **Images** → `Pictures/Downloaded Images`. In Organize Now the vision model looks at them first:
+6. **Images** → `Pictures/Downloaded Images`. In Organize Now the vision model looks at them first:
     a document-like image (receipt, bill, ticket, letter, chart, slide…) skips this rule and is
     decided like a document; a picture (photo, meme, screenshot of an app) stays here, with a real name.
-11. Anything else → the model (below). If it's unsure, the file waits in Downloads; without the model: review.
+7. Anything else → the model (below). If it's unsure, the file waits in Downloads; without the model: review.
 
 ## Your folders, learned (folder profiles)
 
@@ -118,7 +110,7 @@ were downloaded from, and the Finder tags most of them carry (2+ files and 60%+)
 
 - **Purpose:** Organize Now has the model read a profile and write what the folder is for
   ("PDF lecture notes and problem sets"). Only from real files: an empty folder gets no purpose,
-  since one guessed from a name ("FSAE" → "financial records") misleads every later choice. A
+  since one guessed from a name (an acronym read as something else) misleads every later choice. A
   purpose is rewritten when the folder has grown or shrunk by half (and 3+ files).
 - **Tags** of a folder are the ones most of its files carry, so files placed there match them.
 - Fixed in code are only the two folders the safety rules rely on: the review folder and
@@ -129,7 +121,7 @@ were downloaded from, and the Finder tags most of them carry (2+ files and 60%+)
   folder's name, purpose and examples; same download site; same kind of file), so the prompt
   fits the model's small context window. New folders are still checked against all folders.
 - **Corrections:** a model move you undo is remembered ("notes.txt does not belong in
-  Documents/FSAE") and up to 3 relevant ones are shown to the model next time. Moves you keep
+  Documents/Manuals") and up to 3 relevant ones are shown to the model next time. Moves you keep
   teach by example: the file becomes one of the folder's examples.
 
 ## Similar files, placed together (decisions with the catalog)
@@ -146,6 +138,10 @@ Downloads; no similarity cut-off) with the folder each is in, and your folders w
 - **wait:** nothing belongs with it yet. It stays in Downloads, carded and catalogued, listed as
   *waiting for a match*, and isn't asked about again. It's reconsidered only when a new similar
   file lists it among its earlier files.
+
+An earlier file moves only if the chosen folder's name describes it as well as the new file,
+judged for each earlier file on its own; when none passes, the model waits instead of making a
+folder (added in 0.7.0, after the evaluation showed bills pulled into "Newsletters").
 
 Within one run, each decided file joins the catalog straight away (waiting, or "proposed" for its
 folder), so the second of two manuals sees the first and can make a folder for both. An earlier
@@ -219,8 +215,6 @@ Swift then checks every answer:
 - `move_earlier` may only name the earlier files listed; ones already in that folder are dropped.
 - Never Downloads, the review folder or `Documents/Secure` (Secure is only for what the safety
   checks find). Anything rejected means the file waits, with the reason shown.
-- University folders need NSU evidence the model can't make up: a northsouth.edu source,
-  "North South University" in the text, or a known course code.
 - **Tags come from the folder** (the ones most of its files carry), never from the model.
 - The answer starts with its `reason`: a reason written after the choice would only defend it.
 - **Unreadable is not clean:** if text recognition fails (it's retried once), the file can't be
@@ -277,7 +271,7 @@ results in `eval-results/<date>.json`, not committed). Everything happens in a n
   run is settled on the next start by checking where the file actually is. A line cut short by a
   crash is skipped (and reported), so it never hides the rest of the history.
 - **Tags:** `com.apple.metadata:_kMDItemUserTags`, a binary plist of `"Name\nColor"` strings
-  (NSU 4, FSAE 2, Personal 3, Secure 6). Tags already on the file are kept.
+  (e.g. Personal 3, Secure 6). Tags already on the file are kept.
 - **Origin note:** each moved file gets a small `io.github.n1soryu.directory-organizer.origin`
   attribute with its original path.
 - **Undo restores the original state exactly:** original folder and name, original tags, origin
@@ -328,7 +322,7 @@ phrase can't be told apart from a holiday picture, so nothing unread is ever fil
 ## Design
 
 One idea runs through the app: **lanes**. Every destination has a color and a symbol
-(University blue, FSAE green, Secure red, Essays purple, Movies orange, Pictures pink, Review gray),
+(Secure red, Essays purple, Movies orange, Pictures pink, Review gray),
 used for the destination bar on Overview, the groups on Pending Approval, the menu-bar rows and
 the folder cards. The main action, **Organize Now**, is the one gradient button. Pages are
 rounded cards on the window background, in light and dark mode.
@@ -352,7 +346,7 @@ Open Dashboard.
 |---|---|
 | Overview | a header with the state and the main actions, four counts, **where your files are headed** (a bar split by destination), what needs attention, activity, last quick scan and Organize Now, model status |
 | Pending Approval | files waiting for Organize Now, then every proposed move **grouped by destination** (approve a whole group at once), with filters, search and ⌘-click multi-select. Each row: alerts, original and new name, the reason, who decided, a confidence ring, approve / reject. Rejected files have their own filter. The detail panel has a Quick Look preview, the plan, alerts explained, and **every fact read from the file**: source URLs, dates, title, pages, image info, archive contents, and the text or OCR the decision was based on |
-| Alerts | grouped by kind (sensitive, duplicate, rejected suggestion, name clash, unknown course), each explained |
+| Alerts | grouped by kind (sensitive, duplicate, rejected suggestion, name clash), each explained |
 | History | every batch and move from the log, with undo per move or per batch |
 | Review Folder | what's waiting in `To Delete (Review)` and why, put-back, reminder schedule |
 | Folders | the folders files can go to, what each is for, its tags, item counts, folders the app created |
@@ -395,7 +389,7 @@ Sources/OrganizerCore/   facts, safety, rules, planning, applying (no UI)
 Sources/OrganizerMLX/    the MLX engine: downloads, loads and runs the models (GPU)
   Planning/    Planner (duplicates, clashes, new folders), DestinationValidator
   Apply/       Applier, Undoer, SafeMove, MoveJournal (write-ahead log), FinderTags
-  Config/      folder layout, record types, NSU course catalog, FolderCatalog (folders offered to the model),
+  Config/      folder layout, FolderCatalog (folders offered to the model),
                FolderProfile (what your folders hold, learned)
 Sources/TestDataKit/     generates realistic fake downloads + expected results, the vision evaluation's image set, and
                          the benchmark's corpus and scoring (BenchmarkCorpus, for organize eval)

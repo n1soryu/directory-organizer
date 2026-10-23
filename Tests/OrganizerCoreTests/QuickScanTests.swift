@@ -45,7 +45,8 @@ import TestDataKit
         let waiting = Set(plan.waiting.map(\.name))
         // Images and the scan need text recognition; leftovers need the model.
         for name in ["IMG_5012.jpg", "IMG_4821.png", "Screenshot 2026-10-12 at 21.14.03.png", "scan0001.pdf",
-                     "AX55_UserGuide.pdf", "bill_sep.pdf", "notes.txt", "Climate essay draft.docx", "photos.zip"] {
+                     "AX55_UserGuide.pdf", "bill_sep.pdf", "notes.txt", "Climate essay draft.docx", "photos.zip",
+                     "GradeHistory.pdf", "download.pdf", "minutes_oct.docx"] {
             #expect(waiting.contains(name), "\(name) should wait for Organize Now")
         }
         // No OCR happened, and nothing waiting is also in the plan.
@@ -53,10 +54,8 @@ import TestDataKit
         #expect(waiting.isDisjoint(with: plan.actions.map(\.originalName)))
         // Rules still decide what they can right away.
         let byName = Dictionary(uniqueKeysWithValues: plan.actions.map { ($0.originalName, $0) })
-        #expect(byName["GradeHistory.pdf"]?.destinationFolder == "Documents/University/Records/Grades")
         #expect(byName["Avengers_Infinity_War_4K_BluRay.mpeg"]?.finalName == "Avengers Infinity War.mpeg")
         #expect(byName["Chrome Passwords.csv"]?.alerts.first?.kind == .sensitive)
-        #expect(byName["download.pdf"]?.reason.contains("Organize Now can suggest a better name") == true)
     }
 
     @Test func aPhotographedRecoveryPhraseIsNeverFiledAsAPicture() async throws {

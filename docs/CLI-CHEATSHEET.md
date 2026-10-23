@@ -84,9 +84,9 @@ Both debug runs use a throwaway settings file, never your real one.
 ### Reading the plan
 
 ```
-📁 Documents/University/ECO201  (new folder)          ← destination; "new folder" = will be created
-   document (3).pdf → ECO201 Course Outline.pdf       ← original name → new name (if renamed)
-       85% · NSU · rule: course · Course ECO201: …    ← confidence · tags · who decided · why
+📁 Movies/Films  (new folder)                          ← destination; "new folder" = will be created
+   The.Matrix.1999.1080p.BluRay.x264-YIFY.mp4 → The Matrix (1999).mp4   ← original → new name
+       95% · rule: video · Film: …                    ← confidence · tags · who decided · why
 ```
 
 `model: qwen3` means the model decided; "name suggested by the model" means a rule chose the
@@ -97,7 +97,7 @@ If the model isn't available: download it (`organize model-check --download`, or
 Settings), then `swift run organize model` to check again.
 
 Alert icons: 🔐 sensitive file · ♊️ duplicate (same content) · ⚠️ name clash (date added) ·
-❓ unknown course code · ⛔️ destination rejected by the safety checks
+⛔️ destination rejected by the safety checks
 
 ### Typical session
 
@@ -121,7 +121,7 @@ swift run organize undo --last                # changed your mind: everything go
 | `mdfind "kMDItemUserTags == NSU"` | Every file tagged NSU, but only in folders Spotlight indexes. Your real Documents is indexed; `TestData` (inside ~/Developer) wasn't on this Mac, so use `mdls`/`xattr` there |
 | `tail -n 5 TestData/moves.jsonl` | Last entries of the move log (one JSON object per line) |
 
-Tag colors: 0 none · 1 gray · 2 green (FSAE) · 3 purple (Personal) · 4 blue (NSU) · 5 yellow ·
+Tag colors: 0 none · 1 gray · 2 green · 3 purple (Personal) · 4 blue · 5 yellow ·
 6 red (Secure) · 7 orange. In iCloud-synced Documents, iCloud rewrites the number to 1; that's expected.
 
 ## Git

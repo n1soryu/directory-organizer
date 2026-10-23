@@ -61,7 +61,7 @@ public enum TestDataBuilder {
         try Data().write(to: root.appending(path: marker))
 
         let config = OrganizerConfig()
-        for folder in ["Documents/University/ECO372", config.records, config.fsae, config.essays, config.secure,
+        for folder in ["Documents/University/ECO372", Builder.records, Builder.fsae, config.essays, config.secure,
                        "Movies", config.downloadedImages, config.reviewFolder, "Developer", "Music"] {
             try fm.createDirectory(at: home.appending(path: folder), withIntermediateDirectories: true)
         }
@@ -72,7 +72,18 @@ public enum TestDataBuilder {
     }
 }
 
+/// The sandbox owner's own tags. (The app has no rules for them: it learns folders and tags.)
+extension Tag {
+    public static let nsu = Tag("NSU", .blue)
+    public static let fsae = Tag("FSAE", .green)
+}
+
 private final class Builder {
+    /// The sandbox owner's university and team folders. No rule knows them any more: without the
+    /// model their new files go to review; with it, the model learns these folders from what's in them.
+    static let records = "Documents/University/Records"
+    static let fsae = "Documents/FSAE"
+
     let downloads: URL
     let home: URL
     let config = OrganizerConfig()
@@ -120,13 +131,13 @@ private final class Builder {
             if let source { try WhereFroms.write([source], to: url) }
         }
 
-        try place(config.fsae, "2026-09 FSAE Meeting Minutes.docx", tags: [.fsae]) {
+        try place(Self.fsae, "2026-09 FSAE Meeting Minutes.docx", tags: [.fsae]) {
             try Zipper.docx(paragraphs: ["NSU Formula SAE Team: Meeting Minutes", "Frame jig ordered. Brake supplier shortlisted."], to: $0)
         }
-        try place(config.fsae, "Chassis Design Review.pdf", tags: [.fsae]) {
+        try place(Self.fsae, "Chassis Design Review.pdf", tags: [.fsae]) {
             try Drawing.textPDF(pages: ["Formula SAE Chassis Design Review\nSpaceframe, 4130 steel\nTorsional stiffness target: 2000 Nm/deg"], to: $0)
         }
-        try place(config.fsae, "Sponsorship Deck Notes.docx", tags: [.fsae]) {
+        try place(Self.fsae, "Sponsorship Deck Notes.docx", tags: [.fsae]) {
             try Zipper.docx(paragraphs: ["Sponsorship deck: tiers, logo placement, team photo"], to: $0)
         }
 
@@ -143,7 +154,7 @@ private final class Builder {
                 try Drawing.textPDF(pages: [text], to: $0)
             }
         }
-        try place("\(config.records)/Grades", "2026-02-10 Grade History.pdf", tags: [.nsu],
+        try place("\(Self.records)/Grades", "2026-02-10 Grade History.pdf", tags: [.nsu],
                   source: "https://rds2.northsouth.edu/index.php/common/grade_history") {
             try Drawing.textPDF(pages: ["North South University\nGrade History\n\nFall 2025  ECO 101  A"], to: $0)
         }
@@ -154,7 +165,7 @@ private final class Builder {
         try place("Music", "Lofi Study Mix.mp3") { try Data("fake audio".utf8).write(to: $0) }
     }
 
-    // MARK: University
+    // MARK: University (no rules: review without the model; with it, your course folders are learned)
 
     func university() throws {
         // A lecture, an identical second download, and an older different version already filed.
@@ -166,7 +177,7 @@ private final class Builder {
         try FileManager.default.copyItem(at: lecture, to: file("ECO372 Lecture 05 (1).pdf"))
         try Drawing.textPDF(pages: ["ECO 372 Introduction to Econometrics\nLecture 5 (last year's slides)"],
                             to: home.appending(path: "Documents/University/ECO372/ECO372 Lecture 05.pdf"))
-        expect("ECO372 Lecture 05.pdf", "Documents/University/ECO372", "ECO372 Lecture 05 (\(today)).pdf", alerts: [.nameClash])
+        expect("ECO372 Lecture 05.pdf", config.reviewFolder)
         expect("ECO372 Lecture 05 (1).pdf", config.reviewFolder, alerts: [.duplicate])
 
         // An unclear name: only the content says it's the ECO201 outline.
@@ -175,34 +186,34 @@ private final class Builder {
             "North South University\nDepartment of Economics\n\nECO 201: Intermediate Microeconomic Theory I\nCourse Outline, Fall 2026\n\nPrerequisites: ECO 101 and ECO 135\n\nThis course covers consumer choice, production and cost, market structure and an introduction to general equilibrium. Assessment: two midterms, a final and weekly problem sets.",
         ], to: outline)
         try from(outline, "https://www.northsouth.edu/files/eco/ECO201-outline-fall26.pdf")
-        expect("document (3).pdf", "Documents/University/ECO201", "ECO201 Course Outline.pdf")
+        expect("document (3).pdf", config.reviewFolder)
 
-        // Records: dated with the download date, kept side by side.
+        // Records from the university's portal.
         let grades = file("GradeHistory.pdf")
         try Drawing.textPDF(pages: ["North South University\nGrade History\n\nSpring 2026  ECO 104  A-\nSummer 2026  ECO 172  B+"], to: grades)
         try from(grades, "https://rds2.northsouth.edu/index.php/common/grade_history", "https://rds2.northsouth.edu/")
-        expect("GradeHistory.pdf", "\(config.records)/Grades", "\(today) Grade History.pdf")
+        expect("GradeHistory.pdf", config.reviewFolder)
 
         let curriculum = file("Curriculum_BS_Economics.pdf")
         try Drawing.textPDF(pages: [
             "DEPARTMENT OF ECONOMICS\nCurriculum of BS in Economics\n\nENG 103 ENG 105 BUS 251 BEN 205 PHI 101 HIS 103 ECO 101 ECO 104 MIS 107 ECO 172 ECO 135 ECO 173 MAT 125 ECO 245 ECO 201 ECO 204 ECO 301 ECO 304 ECO 372 ECO 490",
         ], title: "BS in Economics", to: curriculum)
         try from(curriculum, "https://www.northsouth.edu/newassets/images/Eco/curriculum.pdf")
-        expect("Curriculum_BS_Economics.pdf", "\(config.records)/Curriculum", "\(today) Curriculum BS Economics.pdf")
+        expect("Curriculum_BS_Economics.pdf", config.reviewFolder)
 
-        // Course found from the slide text.
+        // The course is only in the slide text.
         try Zipper.pptx(slides: [
             ["ECO 204 Intermediate Macroeconomic Theory I", "Week 3: The IS-LM model"],
             ["Goods market equilibrium", "Money market equilibrium"],
         ], to: file("Week3_Slides.pptx"))
-        expect("Week3_Slides.pptx", "Documents/University/ECO204")
+        expect("Week3_Slides.pptx", config.reviewFolder)
 
-        // A course code that isn't in the course list.
+        // A course with no folder yet.
         try Drawing.textPDF(pages: ["Some notes from a class I might take next semester."], to: file("MAT999 notes.pdf"))
-        expect("MAT999 notes.pdf", config.reviewFolder, alerts: [.unknownCourse])
+        expect("MAT999 notes.pdf", config.reviewFolder)
     }
 
-    // MARK: FSAE
+    // MARK: FSAE (no rules either)
 
     func fsae() throws {
         // A phone scan with no text layer: needs OCR.
@@ -216,17 +227,17 @@ private final class Builder {
             2. Powertrain: intake manifold reprint
             3. Business: sponsorship deck due Friday
             """, to: file("scan0001.pdf"))
-        expect("scan0001.pdf", config.fsae, "\(month) FSAE Meeting Minutes.pdf")
+        expect("scan0001.pdf", config.reviewFolder)
 
         try Zipper.docx(paragraphs: [
             "NSU Formula SAE Team: Meeting Minutes",
             "Suspension geometry review moved to Thursday.",
             "Budget request for brake calipers approved.",
         ], to: file("minutes_oct.docx"))
-        expect("minutes_oct.docx", config.fsae)
+        expect("minutes_oct.docx", config.reviewFolder)
 
         try Zipper.xlsx(strings: ["Item", "Cost (BDT)", "Brake calipers", "Tyres", "Fuel pump"], to: file("FSAE_Budget_2026.xlsx"))
-        expect("FSAE_Budget_2026.xlsx", config.fsae)
+        expect("FSAE_Budget_2026.xlsx", config.reviewFolder)
     }
 
     // MARK: Films, TV, images
@@ -329,12 +340,12 @@ private final class Builder {
         ], to: file("bill_sep.pdf"))
         expect("bill_sep.pdf", config.reviewFolder)
 
-        // A rule knows the course, but the name says nothing: the model names it.
+        // Homework for a course you have a folder for, under a name that says nothing.
         let homework = file("download.pdf")
         try Drawing.textPDF(pages: [
             "ECO 372 Introduction to Econometrics\nHomework: Instrumental Variables\n\n1. Explain why OLS is inconsistent when a regressor is correlated with the error term.\n2. Estimate the returns to education using distance to college as an instrument.",
         ], to: homework)
-        expect("download.pdf", "Documents/University/ECO372")
+        expect("download.pdf", config.reviewFolder)
 
         // Still downloading: must be skipped (and the folders below are made after it).
         try Data(repeating: 0, count: 100).write(to: file("bigfile.zip.crdownload"))

@@ -270,6 +270,25 @@ the GPU 30×):
 
 Then the old phases resume: 4 (remove NSU/FSAE/course rules; only universal rules remain) and 5 (earned autonomy).
 
+### After F: universal rules only, and fewer wrong pulls — done 2026-10-23 (0.7.0)
+- **Phase 4 done:** the NSU record, course, unknown-course and FSAE rules, the course catalog, the NSU-evidence check on
+  University folders and their auto-apply categories, lanes and alert are gone. Rules left: sensitive files, installers,
+  code projects, empty folders, incomplete downloads, and films/TV and images by type (generic, not personal; kept).
+  The sandbox still contains its NSU/FSAE files; without the model they now go to review.
+- **Wrong pulls:** one general sentence added to the decision prompt's rule 4 (no examples): move an earlier file only
+  if the chosen folder's name describes it as well as the new file, judged per file; if none passes, wait.
+- `organize eval --decisions --pipeline` (vs F's run): decisions 10 / 0 / 2 (was 9 / 1 / 2; benchmark 10 / 1 / 1),
+  S1 ~ → ✓; S3 and S4 still ✗ with fixed candidates. Pipeline 8 / 1 / 3 (was 7 / 1 / 4), expected files among the 5
+  shown 10/10: S3 ✗ → ✓ (the newsletter waits), S9 ✗ → ✓ (no course rule; the model joined STAT101), but S12 ✓ → ✗
+  (the payslip joined Bills and took the earlier payslip along); S4 (Receipts with the bill and rent receipt) and S10
+  (a "14 Elm Road" folder for the dog-licence form, lease and rent receipt) are still ✗. Decisions got slower:
+  105 s on average (was 77 s). Twelve scenarios are a small set: the net +1 is a direction, not proof.
+- **Sandbox** (`organize plan`, fresh `make-testdata`, ~12 min): with no NSU/FSAE rules, the model filed the three FSAE
+  files into Documents/FSAE (the scan renamed "Team Meeting Minutes 2026-10-12"), the ECO372 homework and lecture into
+  ECO372, and the grade history into University/Records, all learned from the folders. Misses: the shopping list went
+  into a new Utilities folder with the two bills, the ECO201 outline and ECO204 slides into a new University/Curriculum
+  folder with the curriculum, MAT999 notes into a new Lab Notes folder.
+
 ## Costs
 
 | | |

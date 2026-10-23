@@ -27,8 +27,6 @@ struct Lane: Hashable {
         let review = OrganizerConfig().reviewFolder
         if folder == review || folder.hasPrefix(review + "/") { return Lane(name: "Review", symbol: "archivebox.fill", color: .gray) }
         let table: [(String, Lane)] = [
-            ("Documents/University", Lane(name: "University", symbol: "graduationcap.fill", color: .blue)),
-            ("Documents/FSAE", Lane(name: "FSAE", symbol: "car.side.fill", color: .green)),
             ("Documents/Secure", Lane(name: "Secure", symbol: "lock.fill", color: .red)),
             ("Documents/Essays", Lane(name: "Essays", symbol: "text.quote", color: .purple)),
             ("Documents", Lane(name: "Documents", symbol: "doc.text.fill", color: .teal)),
@@ -42,7 +40,7 @@ struct Lane: Hashable {
     }
 
     /// Lanes in a stable display order.
-    static let order = ["University", "FSAE", "Secure", "Essays", "Documents", "Movies", "Pictures", "Music", "Developer", "Other", "Review"]
+    static let order = ["Secure", "Essays", "Documents", "Movies", "Pictures", "Music", "Developer", "Other", "Review"]
 }
 
 // MARK: - Building blocks
@@ -76,7 +74,7 @@ struct LaneIcon: View {
     }
 }
 
-/// "Documents › University › ECO372" with the last part emphasized.
+/// "Documents › Bills › Water" with the last part emphasized.
 struct PathView: View {
     let path: String
     var font: Font = .callout

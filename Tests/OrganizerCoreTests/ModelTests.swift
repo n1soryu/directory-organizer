@@ -87,15 +87,11 @@ struct FakeClassifier: FileClassifier {
         #expect(await planner.decide(facts(name: "x.docx", text: "hmm")).waitReason == "Nothing like it yet: trust me")
     }
 
-    @Test func universityNeedsNSUEvidence() async throws {
+    /// No folder is special any more: a university folder is joined like any other.
+    @Test func noFolderNeedsSpecialEvidence() async throws {
         defer { try? FileManager.default.removeItem(at: home) }
         let planner = try planner(answer(.join, "Documents/University"))
-        let manual = await planner.decide(facts(name: "router guide.pdf", text: "Archer AX55 user guide"))
-        #expect(manual.waitReason?.contains("no sign it's an NSU file") == true)
-
-        var nsu = facts(name: "notice.pdf", text: "Exam schedule")
-        nsu.whereFroms = ["https://www.northsouth.edu/notice.pdf"]
-        #expect(await planner.decide(nsu).decision?.destination == "Documents/University")
+        #expect(await planner.decide(facts(name: "notice.pdf", text: "Exam schedule")).decision?.destination == "Documents/University")
     }
 
     @Test func aNewFolderTakesAnEarlierFileAlong() async throws {

@@ -40,7 +40,7 @@ public struct DecisionRequest: Sendable {
     public var earlier: [EarlierCandidate]
     /// Where a new folder may go for this kind of file ("Documents", "Pictures"…).
     public var newFolderParents: [String]
-    /// Your past corrections that look relevant: "x.pdf doesn't belong in Documents/FSAE".
+    /// Your past corrections that look relevant: "x.pdf doesn't belong in Documents/Manuals".
     public var corrections: [String] = []
 
     public init(facts: FileFacts, folders: [FolderOption], earlier: [EarlierCandidate], newFolderParents: [String],
@@ -88,7 +88,7 @@ public struct FolderDecision: Codable, Sendable, Equatable {
     }
 
     /// What's wrong with the answer for this request, worded for the model; nil if it can be used.
-    /// The planner checks the same things (and more: the disk, NSU evidence) once more afterwards.
+    /// The planner checks the same things (and more: the disk) once more afterwards.
     public func problem(in request: DecisionRequest) -> String? {
         let ids = Set(request.earlier.map(\.id))
         if let unknown = moveEarlier.first(where: { !ids.contains($0) }) {

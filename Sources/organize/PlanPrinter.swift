@@ -133,7 +133,7 @@ struct PlanPrinter {
         Swift.print(dim("Undo a batch with: organize undo --batch <id>"))
     }
 
-    /// Paths relative to the sandbox, e.g. "Downloads/x.pdf" or "Home/Documents/FSAE/x.pdf".
+    /// Paths relative to the sandbox, e.g. "Downloads/x.pdf" or "Home/Documents/Manuals/x.pdf".
     private func show(_ path: String, _ home: URL) -> String {
         let base = home.deletingLastPathComponent().path + "/"
         return path.hasPrefix(base) ? String(path.dropFirst(base.count)) : path
@@ -151,7 +151,6 @@ struct PlanPrinter {
         case .sensitive: "🔐"
         case .duplicate: "♊️"
         case .nameClash: "⚠️"
-        case .unknownCourse: "❓"
         case .rejected: "⛔️"
         }
     }

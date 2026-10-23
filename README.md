@@ -14,8 +14,9 @@ files and adds Finder tags. Simple rules handle the obvious cases; an on-device 
 
 ## What it does
 
-- **Watches Downloads** and sorts new files within seconds with rules: course files by course code,
-  NSU records (dated), FSAE files, films and TV (cleaned names), installers, code projects.
+- **Watches Downloads** and sorts the obvious files within seconds with a few universal rules:
+  films and TV (cleaned names), images, installers, code projects, sensitive files. No personal
+  rules: everything else is the model's, which learns what your own folders are for.
 - **Organize Now** (menu bar button) does the heavy work on demand: text recognition for images and
   scans, a vision model that looks at images (a photographed receipt is filed like a receipt; a
   photo gets a real name), and the on-device model for files no rule fits and for unclear names.

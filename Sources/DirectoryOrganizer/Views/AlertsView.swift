@@ -7,7 +7,7 @@ struct AlertsView: View {
 
     var body: some View {
         let groups = Dictionary(grouping: model.pending.flatMap { action in action.alerts.map { (action, $0) } }, by: \.1.kind)
-        let order: [FileAlert.Kind] = [.sensitive, .duplicate, .rejected, .nameClash, .unknownCourse]
+        let order: [FileAlert.Kind] = [.sensitive, .duplicate, .rejected, .nameClash]
         Page {
             SectionTitle(title: "Alerts", subtitle: "Things worth a look before you approve. Nothing here moves on its own.")
             if groups.isEmpty {

@@ -68,9 +68,6 @@ public struct AutoApplyPolicy: Codable, Equatable, Sendable {
     public static let categories: [Category] = [
         Category(id: "films", title: "Films, TV and clips", detail: "Movies/Films, TV Shows, Clips, with cleaned-up names", rules: ["video"]),
         Category(id: "images", title: "Images and screenshots", detail: "Pictures/Downloaded Images", rules: ["image"]),
-        Category(id: "courses", title: "Course files", detail: "University/<course>, when the course code is in the file name", rules: ["course"]),
-        Category(id: "records", title: "NSU records", detail: "University/Records/…, dated", rules: ["NSU record"]),
-        Category(id: "fsae", title: "FSAE files", detail: "Documents/FSAE, when FSAE is in the file name", rules: ["FSAE"]),
         Category(id: "installers", title: "Installers and firmware", detail: "to the review folder", rules: ["installer"]),
         Category(id: "code", title: "Code projects", detail: "to the review folder", rules: ["code project"]),
     ]

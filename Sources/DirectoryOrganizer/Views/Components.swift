@@ -88,7 +88,6 @@ extension FileAlert.Kind {
         case .sensitive: "Sensitive file"
         case .duplicate: "Duplicate"
         case .nameClash: "Name clash"
-        case .unknownCourse: "Unknown course"
         case .rejected: "Suggestion rejected"
         }
     }
@@ -98,7 +97,6 @@ extension FileAlert.Kind {
         case .sensitive: "lock.shield.fill"
         case .duplicate: "plus.square.on.square"
         case .nameClash: "textformat.alt"
-        case .unknownCourse: "questionmark.folder"
         case .rejected: "hand.raised.fill"
         }
     }
@@ -108,7 +106,6 @@ extension FileAlert.Kind {
         case .sensitive: .red
         case .duplicate: .orange
         case .nameClash: .yellow
-        case .unknownCourse: .blue
         case .rejected: .purple
         }
     }
@@ -119,8 +116,7 @@ extension FileAlert.Kind {
         case .sensitive: "Passwords, a recovery phrase, a private key or credentials. Plain-text password exports go to review so you can delete them after importing; everything else goes to Secure."
         case .duplicate: "Byte-for-byte identical to another file (same SHA-256). The copy goes to review; nothing is deleted."
         case .nameClash: "A different file with the same name is already there. Nothing is overwritten: this one gets the date added to its name."
-        case .unknownCourse: "Looks like a course code that isn't in your course list, so no course folder is created."
-        case .rejected: "A suggestion broke a safety rule (folder not allowed, not offered, or no NSU evidence), so the file goes to review."
+        case .rejected: "A suggestion broke a safety rule (folder not allowed, or not offered), so the file goes to review."
         }
     }
 }

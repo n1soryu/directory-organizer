@@ -28,16 +28,10 @@ public struct RulesEngine: Sendable {
         InstallerRule(),
         CodeProjectRule(),
         EmptyFolderRule(),
-        // 2. Strong signals: names and download source.
-        RecordByNameRule(),
-        CourseRule(),
-        FSAERule(),
-        RecordByContentRule(),
-        // 3. File type.
+        // 2. File type: films and episodes by their names; images until the vision model has seen them.
         VideoRule(),
         ImageRule(),
-        // 4. Last resort before the model: a course code we don't know.
-        UnknownCourseRule(),
+        // Everything else is the model's (no personal rules: it learns your folders instead).
     ])
 }
 

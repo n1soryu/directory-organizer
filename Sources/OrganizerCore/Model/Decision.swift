@@ -10,8 +10,6 @@ public struct Tag: Codable, Hashable, Sendable {
         self.color = color
     }
 
-    public static let nsu = Tag("NSU", .blue)
-    public static let fsae = Tag("FSAE", .green)
     public static let personal = Tag("Personal", .purple)
     public static let secure = Tag("Secure", .red)
 }
@@ -30,8 +28,6 @@ public struct Alert: Codable, Hashable, Sendable {
         case duplicate
         /// Same name as an existing, different file: the new one gets a dated name.
         case nameClash
-        /// Looks like a course code that isn't in your course list.
-        case unknownCourse
         /// The proposal broke a safety rule and was redirected to review.
         case rejected
     }
@@ -62,7 +58,7 @@ public enum DecisionSource: Codable, Hashable, Sendable, CustomStringConvertible
 
 /// A rule's (or the classifier's) answer for one file, before the planner checks it.
 public struct Decision: Sendable {
-    /// Folder relative to the home root, e.g. "Documents/University/ECO372".
+    /// Folder relative to the home root, e.g. "Documents/Bills/Water".
     public var destination: String
     /// New name without extension, or nil to keep the current name.
     public var newBaseName: String?

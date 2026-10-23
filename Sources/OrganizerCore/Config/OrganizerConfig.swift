@@ -5,9 +5,6 @@ import Foundation
 public struct OrganizerConfig: Sendable {
     public var reviewFolder = "Desktop/To Delete (Review)"
 
-    public var university = "Documents/University"
-    public var records = "Documents/University/Records"
-    public var fsae = "Documents/FSAE"
     public var essays = "Documents/Essays"
     public var secure = "Documents/Secure"
 
@@ -30,37 +27,5 @@ public struct OrganizerConfig: Sendable {
     /// Proposals below this confidence go to review instead (used for the model in Milestone 3).
     public var confidenceThreshold = 0.75
 
-    public var courses = CourseCatalog.bsEconomics
-    public var recordTypes = RecordType.nsuDefaults
-
     public init() {}
-}
-
-/// A kind of NSU record. Records are kept forever, side by side, with the download date
-/// at the front of the name: "2026-10-13 Grade History.pdf", "2027-02-01 Grade History.pdf".
-public struct RecordType: Sendable {
-    /// Name used when the downloaded file's own name is unclear.
-    public var label: String
-    /// Subfolder of Records.
-    public var folder: String
-    /// Lowercase phrases matched against the file name and the first lines of text.
-    public var keywords: [String]
-
-    public init(_ label: String, folder: String, keywords: [String]) {
-        self.label = label
-        self.folder = folder
-        self.keywords = keywords
-    }
-
-    public static let nsuDefaults: [RecordType] = [
-        RecordType("Grade History", folder: "Grades", keywords: ["grade history", "grade report", "grade sheet", "gradesheet"]),
-        RecordType("Transcript", folder: "Grades", keywords: ["transcript"]),
-        RecordType("Advising Slip", folder: "Advising", keywords: ["advising"]),
-        RecordType("Payment Receipt", folder: "Payments", keywords: ["payment", "money receipt", "fee receipt", "tuition", "invoice"]),
-        RecordType("Admit Card", folder: "Admit Cards", keywords: ["admit card"]),
-        RecordType("Course Registration", folder: "Registration", keywords: ["registration", "enrollment", "enrolment"]),
-        RecordType("Certificate", folder: "Certificates", keywords: ["certificate"]),
-        RecordType("Curriculum", folder: "Curriculum", keywords: ["curriculum", "degree plan"]),
-        RecordType("Academic Calendar", folder: "Calendars", keywords: ["academic calendar"]),
-    ]
 }

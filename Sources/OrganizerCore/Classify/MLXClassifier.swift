@@ -123,7 +123,7 @@ public actor MLXClassifier: FileClassifier {
             1. Nothing is ever deleted. You only choose folders and names.
             2. "join": put the new file in an existing folder. "folder" must be copied exactly from the list of existing folders.
             3. "new_folder": create a folder for the new file together with earlier files that are clearly the same kind of thing and that a person would want kept together. "folder" is the new folder's full path; it must start with \(parents) and must not already exist. It may be inside an existing folder. "move_earlier" must list at least one earlier file id.
-            4. "move_earlier": ids of earlier files that should move into the chosen folder. Use only ids from the list. Leave out files that are already in that folder. It may be [] for "join".
+            4. "move_earlier": ids of earlier files that should move into the chosen folder. Use only ids from the list. Leave out files that are already in that folder. It may be [] for "join". Move an earlier file only if the chosen folder's name describes that file as well as the new one; decide this for each earlier file on its own. When no earlier file passes, do not create a new folder: "wait" instead.
             5. "wait": nothing belongs with this file yet. "folder" is null and "move_earlier" is [].
             6. Files belong together when they are the same kind of document for the same purpose, not just because they share a word or come from the same company.
             7. Prefer an existing folder when it fits.

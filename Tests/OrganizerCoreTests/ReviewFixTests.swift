@@ -21,11 +21,10 @@ import Testing
         #expect(FileKind(fileExtension: "", isDirectory: true) == .folder)
     }
 
-    /// MED-9: a code glued to other letters, in any alphabet, isn't a code.
+    /// MED-9: a word glued to other letters, in any alphabet, isn't that word.
     @Test func wordBoundariesAreUnicode() {
-        #expect(CourseCatalog.codes(in: "ЭECO372 notes").isEmpty)
-        #expect(CourseCatalog.codes(in: "ECO 372 notes") == ["ECO372"])
         #expect(!containsWords("Иnsu", "nsu"))
+        #expect(containsWords("the nsu notice", "nsu"))
     }
 
     /// MED-10, MED-32: a file that can't be read is kept aside, not overwritten.

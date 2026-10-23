@@ -309,7 +309,7 @@ public struct Planner: Sendable {
         var list = FolderProfiler.profiles(homeRoot: homeRoot, config: config, cached: profiles)
         guard mode == .full else { return list }
         // Only from real contents: a purpose guessed from an empty folder's name is a guess
-        // ("FSAE" → "financial records") that would mislead every later decision.
+        // (an acronym read as something else) that would mislead every later decision.
         let todo = list.indices.filter { list[$0].fileCount > 0 && list[$0].needsPurpose }
         for (step, index) in todo.enumerated() {
             try Task.checkCancellation()
@@ -439,11 +439,6 @@ public struct Planner: Sendable {
             .max { $0.path.count < $1.path.count }?.tags ?? []
     }
 
-    func hasNSUEvidence(_ facts: FileFacts) -> Bool {
-        facts.isNSU
-            || !config.courses.knownCodes(in: facts.baseName + "\n" + facts.head(3_000)).isEmpty
-    }
-
     func toReview(_ reason: String, confidence: Double, alerts: [Alert] = []) -> Decision {
         Decision(destination: config.reviewFolder, confidence: confidence, reason: reason,
                  source: .classifier(classifier.name), alerts: alerts)
@@ -512,10 +507,6 @@ public struct Planner: Sendable {
             if facts.kind == .image {
                 // Images: "2026-10-12 Router wireless settings page", dated by when it was taken.
                 title = "\(FileNames.day(facts.image?.dateTaken ?? facts.downloadDate)) \(title)"
-            } else if let code = decision.destination.split(separator: "/").last.map(String.init),
-                      config.courses.contains(code),
-                      !title.uppercased().replacingOccurrences(of: " ", with: "").contains(code) {
-                title = "\(code) \(title)"
             }
             decision.newBaseName = title
             decision.reason += "; name suggested by the model"
